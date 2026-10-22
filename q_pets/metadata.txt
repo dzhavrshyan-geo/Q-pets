@@ -1,0 +1,19 @@
+[general]
+name=Q-pets
+qgisMinimumVersion=3.16
+supportsQt6=True
+description=Питомец-обезьянка, который работает вместе с вами в QGIS
+version=0.1.0
+author=Robert Dzhavrhsyan
+email=dzhavrshyan.gg@gmail.com
+
+about=При запуске QGIS в углу открывается небольшое окошко с питомцем. Пока вы печатаете или работаете мышкой, он тоже печатает и водит мышкой; пока QGIS рисует карту или считает инструмент — ждёт вместе с вами. Через 15 секунд простоя питомец отвлекается на свои дела: смотрит в окно, сидит в телефоне, пьёт кофе, потягивается, а после долгого простоя дремлет. Три питомца на выбор; окошко можно перетащить куда угодно, прикрепить к боковой панели или свернуть.
+
+repository=https://github.com/dzhavrshyan-geo/Q-pets
+tracker=https://github.com/dzhavrshyan-geo/Q-pets/issues
+homepage=https://github.com/dzhavrshyan-geo/Q-pets
+tags=fun,pet,monkey,питомец
+category=Plugins
+icon=icon.png
+experimental=True
+deprecated=False
