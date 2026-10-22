@@ -20,9 +20,10 @@ DEFAULT_SIZE = (340, 290)
 class ActivityWatcher(QObject):
     """Ловит нажатия клавиш и мыши во всех окнах QGIS (кроме самого питомца)."""
 
-    KEY_EVENTS = (QEvent.Type.KeyPress,)
-    MOUSE_EVENTS = (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick,
-                    QEvent.Type.Wheel)
+    # Сочетания вроде Ctrl+S до виджета доходят только как ShortcutOverride
+    KEY_EVENTS = (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride)
+    MOUSE_EVENTS = (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick)
+    WHEEL_EVENT = QEvent.Type.Wheel
     MOVE_EVENT = QEvent.Type.MouseMove
 
     def __init__(self, panel, dock):
@@ -30,29 +31,51 @@ class ActivityWatcher(QObject):
         self.panel = panel
         self.dock = dock
         self.last_move = 0.0
+        self.last_combo = (None, 0.0)
 
     def eventFilter(self, obj, event):
         etype = event.type()
         if etype in self.KEY_EVENTS:
-            is_key = True
+            kind = "key"
         elif etype in self.MOUSE_EVENTS:
-            is_key = False
+            kind = "mouse"
+        elif etype == self.WHEEL_EVENT:
+            kind = "wheel"
         elif etype == self.MOVE_EVENT:
             now = time.monotonic()
             if now - self.last_move < 0.15:
                 return False
             self.last_move = now
-            is_key = False
+            kind = "mouse"
         else:
             return False
         # Событие приходит и окну, и виджету — считаем только виджеты
         if not isinstance(obj, QWidget) or obj is self.dock or self.dock.isAncestorOf(obj):
             return False
-        if is_key:
-            self.panel.key_pressed()
+        if kind == "key":
+            self.panel.key_pressed(self.combo(event))
         else:
-            self.panel.mouse_used()
+            self.panel.mouse_used(wheel=kind == "wheel")
         return False
+
+    def combo(self, event):
+        """Ctrl+S — «save», Ctrl+Z — «undo» (одно нажатие приходит дважды — считаем раз)."""
+        modifiers = event.modifiers()
+        if not modifiers & Qt.KeyboardModifier.ControlModifier:
+            return None
+        key = event.key()
+        if key == Qt.Key.Key_S:
+            name = "save"
+        elif key == Qt.Key.Key_Z and not modifiers & Qt.KeyboardModifier.ShiftModifier:
+            name = "undo"
+        else:
+            return None
+        now = time.monotonic()
+        previous, when = self.last_combo
+        self.last_combo = (name, now)
+        if previous == name and now - when < 0.4:
+            return None
+        return name
 
 
 class QPetsPlugin:

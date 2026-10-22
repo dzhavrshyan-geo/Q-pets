@@ -3,7 +3,7 @@
 
 Сцена рисуется в логических координатах 320×240 (масштабирует pet_widget.py).
 Слева — окно в лес, справа — монитор с QGIS, в центре за столом — питомец.
-Руки ставятся по положению кисти (поза), локоть считается сам (draw_arm).
+Руки — мягкие дуги от плеча к кисти через локоть (arm_curve).
 """
 
 import math
@@ -13,14 +13,15 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath,
                              QPen, QPolygonF, QRadialGradient, QTransform)
 
-from .animation import MUG_DESK
+from .animation import STICKY
 
 W, H = 320.0, 240.0
 DESK_Y = 164.0      # задний край столешницы
 DESK_FRONT = 204.0  # передний край
 NECK = (150.0, 116.0)
 SHOULDER_DX, SHOULDER_Y = 23.0, 128.0
-UPPER_ARM, FOREARM = 34.0, 34.0
+ARM_LENGTH = 72.0  # длина руки: чем ближе кисть к плечу, тем сильнее изгиб
+ELBOW_PULL = (0.6, 1.0)  # куда тянется локоть: наружу и вниз
 
 # Экран монитора: прямоугольник содержимого → четырёхугольник в сцене (монитор
 # развёрнут к питомцу, поэтому правый край чуть дальше и меньше)
@@ -72,22 +73,26 @@ def draw_scene(p, pet, pose, ctx):
     p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     t = ctx["t"]
+    has_tiger = "tiger" in pet["specials"]
+    arms_back = pose["armsback"] > 0.5  # руки за головой
     draw_room(p, pet, ctx)
     draw_chair(p, pet)
     if pet.get("tail"):
         draw_tail(p, pet, t)
     draw_body(p, pet, pose)
+    if arms_back:
+        draw_arms(p, pet, pose)
     draw_head(p, pet, pose)
-    if pet["special"] == "tiger":
+    if has_tiger:
         draw_tiger(p, pose, t)
     draw_desk(p)
     draw_desk_items(p, pet, pose, ctx)
-    if pet["special"] == "tiger":
-        draw_tiger_paws(p, pose)
-    draw_arm(p, pet, pose, left=True)
-    draw_arm(p, pet, pose, left=False)
-    if not mug_on_desk(pose):
-        draw_mug(p, pet, pose, t)  # кружку в руке держат перед собой
+    if has_tiger:
+        draw_tiger_paws(p, pose, t)
+    if not arms_back:
+        draw_arms(p, pet, pose)
+    if pose["toy"] > 0.01:
+        draw_toy(p, pose, t)
     draw_overlays(p, pet, pose, t)
 
 
@@ -429,7 +434,9 @@ def draw_eyes(p, pet, pose, cx, cy):
         ry *= 1.0 + 0.2 * (openness - 1.0)
     look_x = pose["lookx"] * 2.3 + pose["turn"] * 0.8
     look_y = pose["looky"] * 2.0
+    eyes = openness
     for side in (-1, 1):
+        openness = eyes * (1.0 - pose["wink"]) if side > 0 else eyes
         ex, ey = cx + side * gap, cy - 2
         if openness < 0.12:
             # закрытый глаз — дуга
@@ -599,10 +606,11 @@ def draw_tiger(p, pose, t):
         else:
             fill(p, "#FFFFFF")
             ellipse(p, ex, ey, 2.8, 3.0)
+            up = -1.0 * pose["tpaw"]
             fill(p, "#3C5A2A")
-            ellipse(p, ex + 0.3, ey + 0.3, 2.0)
+            ellipse(p, ex + 0.3, ey + 0.3 + up, 2.0)
             fill(p, "#000000")
-            ellipse(p, ex + 0.3, ey + 0.3, 1.1)
+            ellipse(p, ex + 0.3, ey + 0.3 + up, 1.1)
             fill(p, "#FFFFFF")
             ellipse(p, ex - 0.4, ey - 0.6, 0.6)
     fill(p, "#E77C86")
@@ -615,14 +623,17 @@ def draw_tiger(p, pose, t):
         p.drawLine(QPointF(x, y + 4), QPointF(x, y + 6))
 
 
-def draw_tiger_paws(p, pose):
+def draw_tiger_paws(p, pose, t):
+    """Лапки на краю стола; когда тигрёнок играет — по очереди ловят игрушку."""
     x, _ = TIGER
-    for dx in (-7, 7):
+    for i, dx in enumerate((-7, 7)):
+        lift = 14.0 * pose["tpaw"] * abs(math.sin(t * 5.0 + i * 1.6))
+        y = DESK_Y + 1 - lift
         fill(p, "#E98A2F", "#7A4314", 0.8)
-        p.drawEllipse(QRectF(x + dx - 5, DESK_Y + 1, 10, 7))
+        p.drawEllipse(QRectF(x + dx - 5, y, 10, 7))
         p.setPen(pen("#2B1C12", 1.0))
-        p.drawLine(QPointF(x + dx - 1.5, DESK_Y + 2), QPointF(x + dx - 1.5, DESK_Y + 5))
-        p.drawLine(QPointF(x + dx + 1.5, DESK_Y + 2), QPointF(x + dx + 1.5, DESK_Y + 5))
+        p.drawLine(QPointF(x + dx - 1.5, y + 1), QPointF(x + dx - 1.5, y + 4))
+        p.drawLine(QPointF(x + dx + 1.5, y + 1), QPointF(x + dx + 1.5, y + 4))
 
 
 # ---------------------------------------------------------------- стол и вещи
@@ -648,13 +659,18 @@ def draw_desk_items(p, pet, pose, ctx):
     elif extra == "books":
         draw_books(p)
     elif extra == "penguin":
-        draw_penguin(p, 50, 186)
+        draw_paper_stack(p)
+        draw_penguin(p, 40, 195)
     draw_monitor(p, ctx)
     draw_keyboard(p, ctx)
     draw_mouse(p, pose)
+    draw_sticky(p)
+    # вещи, которые питомец берёт в руки (рисуются до рук — ладони поверх)
+    draw_read_item(p, pet, pose)
+    draw_banana(p, pose)
     draw_phone(p, pet, pose)
-    if mug_on_desk(pose):
-        draw_mug(p, pet, pose, t)
+    draw_mug(p, pet, pose, t)
+    draw_plane(p, pose)
 
 
 def draw_plant(p, t):
@@ -692,6 +708,160 @@ def draw_books(p):
         p.drawRect(QRectF(x, y - 6, 34, 6))
         p.setPen(pen("#D9C27A", 0.6))
         p.drawLine(QPointF(x + 6, y - 3), QPointF(x + 24 - i * 2, y - 3))
+
+
+def draw_paper_stack(p):
+    for i in range(5):
+        y = 182 - i * 2.2
+        fill(p, "#FBFAF5" if i % 2 else "#F1EEE4", "#CFC9BB", 0.5)
+        p.drawRect(QRectF(40 + (i % 3) * 0.7, y - 3, 30, 3))
+
+
+def draw_sticky(p):
+    """Стопка стикеров у клавиатуры."""
+    x, y = STICKY
+    fill(p, "#E8C94A", "#B89A2A", 0.5)
+    p.drawPolygon(poly([(x - 6, y - 2), (x + 5, y - 3), (x + 7, y + 3), (x - 4, y + 4)]))
+    fill(p, "#FBE27A", "#C9A93A", 0.5)
+    p.drawPolygon(poly([(x - 6, y - 3.5), (x + 5, y - 4.5), (x + 7, y + 1.5), (x - 4, y + 2.5)]))
+    p.setPen(pen("#9A8A5A", 0.5))
+    p.drawLine(QPointF(x - 3, y - 2), QPointF(x + 3, y - 2.6))
+
+
+def draw_read_item(p, pet, pose):
+    """Распечатка карты (или книга) в руках; лёжа она — часть стопки."""
+    up = pose["rdup"]
+    if up < 0.02:
+        return
+    x, y = pose["rdx"], pose["rdy"]
+    w, h = 32.0, 4.0 + 20.0 * up
+    p.save()
+    p.translate(x, y)
+    if pet.get("read_item") == "book":
+        cover = C("#2F5B45")
+        fill(p, cover, cover.darker(140), 0.8)
+        p.drawRoundedRect(QRectF(-w / 2 - 1.5, -h / 2 - 1, w + 3, h + 2.5), 1.5, 1.5)
+        fill(p, "#FBF7EC", "#CFC6B0", 0.5)
+        p.drawRect(QRectF(-w / 2, -h / 2, w / 2 - 0.4, h))
+        p.drawRect(QRectF(0.4, -h / 2, w / 2 - 0.4, h))
+        if up > 0.6:
+            p.setPen(pen("#A8A08C", 0.6))
+            for i in range(5):
+                ly = -h / 2 + 3 + i * 3.4
+                p.drawLine(QPointF(-w / 2 + 2, ly), QPointF(-2.5, ly))
+                p.drawLine(QPointF(2.5, ly), QPointF(w / 2 - 2 - (i % 2) * 4, ly))
+    else:
+        fill(p, "#FFFFFF", "#CFC9BB", 0.6)
+        p.drawRect(QRectF(-w / 2, -h / 2, w, h))
+        if up > 0.6:
+            g = QLinearGradient(0, -h / 2, 0, h / 2)
+            g.setColorAt(0, C("#BFDE8C"))
+            g.setColorAt(1, C("#7DB85A"))
+            fill(p, g)
+            p.drawRect(QRectF(-w / 2 + 2, -h / 2 + 2, 17, h - 4))
+            p.setPen(pen("#C9554A", 0.6))
+            p.drawPolyline(poly([(-w / 2 + 3, -2), (-w / 2 + 9, -4), (-w / 2 + 13, 3),
+                                 (-w / 2 + 18, 1)]))
+            p.setPen(pen("#A9A9A9", 0.7))
+            for i in range(4):
+                ly = -h / 2 + 4 + i * 4
+                p.drawLine(QPointF(4, ly), QPointF(w / 2 - 2 - (i % 2) * 3, ly))
+    p.restore()
+
+
+def banana_outline(bite):
+    """Банан вдоль оси y (верхушка сверху), выгнут вправо; bite — сколько откушено."""
+    start = clamp01(bite) * 0.82
+    left, right = [], []
+    steps = 14
+    for i in range(steps + 1):
+        k = start + (1.0 - start) * i / steps
+        cx = 4.5 * math.sin(math.pi * k)
+        cy = -11.0 + 22.0 * k
+        half = 0.7 + 3.3 * math.sin(math.pi * (0.08 + 0.84 * k)) ** 0.6
+        left.append((cx - half, cy))
+        right.append((cx + half, cy))
+    return left, right, start
+
+
+def clamp01(x):
+    return 0.0 if x < 0 else 1.0 if x > 1 else x
+
+
+def draw_banana(p, pose):
+    vis = pose["bnvis"]
+    if vis < 0.02:
+        return
+    p.save()
+    p.setOpacity(vis)
+    p.translate(pose["bnx"], pose["bny"])
+    p.rotate(pose["bnrot"])
+    peeled = pose["bnpeel"]
+    left, right, start = banana_outline(pose["bnbite"])
+    shape = poly(left + right[::-1])
+    if peeled > 0.5:
+        fill(p, "#FFF4C8", "#D9C27A", 0.7)  # мякоть
+        p.drawPolygon(shape)
+        # шкурка снизу и три лепестка, свисающие вниз
+        lo = [pt for pt in left if pt[1] > 2]
+        ro = [pt for pt in right if pt[1] > 2]
+        fill(p, "#F5D03C", "#B8932A", 0.7)
+        p.drawPolygon(poly(lo + ro[::-1]))
+        for dx, tip in ((-4.5, (-9, 10)), (5.5, (12, 9)), (1.0, (2, 13))):
+            path = QPainterPath(QPointF(dx - 1.8, 2))
+            path.quadTo(QPointF(dx + tip[0] * 0.3, 8), QPointF(*tip))
+            path.quadTo(QPointF(dx + tip[0] * 0.2 + 2, 6), QPointF(dx + 1.8, 2))
+            p.drawPath(path)
+    else:
+        fill(p, "#F5D03C", "#B8932A", 0.8)
+        p.drawPolygon(shape)
+        p.setPen(pen("#D9B12E", 0.6))
+        mid = [((a[0] + b[0]) / 2 + 1, a[1]) for a, b in zip(left, right)]
+        p.drawPolyline(poly(mid[2:-2]))
+        if start < 0.01:
+            fill(p, "#5A4220")
+            ellipse(p, left[0][0] + 0.7, -11.0, 0.9)
+    fill(p, "#6B5228")
+    p.drawRect(QRectF(-1.0, 10.0, 2.0, 2.4))  # хвостик
+    p.restore()
+
+
+def draw_plane(p, pose):
+    vis = pose["plvis"]
+    if vis < 0.02:
+        return
+    p.save()
+    p.setOpacity(vis)
+    p.translate(pose["plx"], pose["ply"])
+    p.rotate(pose["plrot"])
+    fill(p, "#FFFFFF", "#9A9A9A", 0.7)
+    p.drawPolygon(poly([(10, 0), (-8, -6), (-4, 0), (-8, 2)]))
+    fill(p, "#E6E6E6", "#9A9A9A", 0.7)
+    p.drawPolygon(poly([(10, 0), (-4, 0), (-8, 5), (-5, 1.5)]))
+    p.restore()
+
+
+def draw_toy(p, pose, t):
+    """Дразнилка: палочка в левой руке, на верёвочке — помпон с пёрышком."""
+    a = pose["toy"]
+    hx, hy = pose["hlx"], pose["hly"]
+    tip = (hx - 8, hy - 6)
+    swing = 5.0 * math.sin(t * 3.0)
+    ball = (tip[0] + swing - 2, tip[1] + 24 + 2.0 * math.cos(t * 6.0))
+    p.save()
+    p.setOpacity(a)
+    p.setPen(pen("#8B5A2B", 1.6))
+    p.drawLine(QPointF(hx, hy), QPointF(*tip))
+    p.setPen(pen("#6A6A6A", 0.6))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    string = QPainterPath(QPointF(*tip))
+    string.quadTo(QPointF(tip[0] + swing * 0.3, tip[1] + 14), QPointF(*ball))
+    p.drawPath(string)
+    fill(p, "#4FB6D8")
+    p.drawEllipse(QRectF(ball[0] - 1, ball[1] + 1, 2.2, 7))
+    fill(p, "#F06EA0", "#C0447A", 0.6)
+    ellipse(p, ball[0], ball[1], 3.2)
+    p.restore()
 
 
 def draw_penguin(p, x, y):
@@ -744,13 +914,9 @@ def draw_mouse(p, pose):
     p.drawLine(QPointF(x, y - 6), QPointF(x, y - 1.5))
 
 
-def mug_on_desk(pose):
-    return pose["mugy"] > MUG_DESK[1] - 8
-
-
 def draw_mug(p, pet, pose, t):
     x, y, rot = pose["mugx"], pose["mugy"], pose["mugrot"]
-    if abs(x - MUG_DESK[0]) < 1 and abs(y - MUG_DESK[1]) < 1:
+    if abs(rot) < 8:
         # пар над горячим кофе
         p.setBrush(Qt.BrushStyle.NoBrush)
         for i in range(2):
@@ -803,7 +969,16 @@ def draw_phone(p, pet, pose):
     p.rotate(pose["phrot"])
     fill(p, case, case.darker(150), 0.8)
     p.drawRoundedRect(QRectF(-w / 2, -h / 2, w, h), 2.2, 2.2)
-    if up > 0.4:
+    if up > 0.4 and pose["phback"] > 0.5:
+        # задняя крышка с камерой (селфи)
+        fill(p, "#15161A", "#000000", 0.4)
+        p.drawRoundedRect(QRectF(-w / 2 + 1.5, -h / 2 + 1.5, 6, 6), 1.5, 1.5)
+        fill(p, "#3A4A66")
+        ellipse(p, -w / 2 + 3.2, -h / 2 + 3.2, 1.1)
+        ellipse(p, -w / 2 + 5.8, -h / 2 + 5.8, 1.1)
+        fill(p, case.lighter(130))
+        ellipse(p, 0, 2, 2.6)
+    elif up > 0.4:
         screen = QRectF(-w / 2 + 1.4, -h / 2 + 1.6, w - 2.8, h - 3.2)
         g = QLinearGradient(0, screen.top(), 0, screen.bottom())
         g.setColorAt(0, C("#BFE3FF"))
@@ -911,6 +1086,12 @@ def draw_screen(p, ctx):
     if mode == "pan":
         pan_x = 6.0 * math.sin(t * 0.45)
         pan_y = 4.0 * math.sin(t * 0.33)
+    if mode == "zoom":
+        # колёсико: карта приближается и отдаляется вокруг центра
+        zoom = 1.0 + 0.3 * math.sin(t * 1.6)
+        p.translate(75, 44)
+        p.scale(zoom, zoom)
+        p.translate(-75, -44)
     p.translate(24 + pan_x, 2 + pan_y)
     for quad, color in map_cells():
         fill(p, color, "#FFFFFF", 0.35)
@@ -933,6 +1114,23 @@ def draw_screen(p, ctx):
                             (cx + 4.6, cy + 7.4), (cx + 3.2, cy + 4.8), (cx + 5.4, cy + 4.8)]))
     elif mode == "typing":
         draw_attribute_table(p, t)
+    elif mode == "saved":
+        fill(p, "#3E8E3E", "#2C6B2C", 0.6)
+        p.drawRoundedRect(QRectF(64, 60, 52, 12), 3, 3)
+        p.setPen(pen("#FFFFFF", 1.4))
+        p.drawPolyline(poly([(68, 66), (70, 68.5), (74, 63.5)]))
+        font = QFont()
+        font.setPixelSize(6)
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(QRectF(76, 60, 40, 12), Qt.AlignmentFlag.AlignVCenter, "Сохранено")
+    elif mode == "undo":
+        p.fillRect(QRectF(31, 9, SCREEN_W - 31, SCREEN_H - 9), C("#FFFFFF", 90))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(pen("#E08A2E", 3.2))
+        p.drawArc(QRectF(62, 28, 24, 24), 200 * 16, -250 * 16)
+        fill(p, "#E08A2E")
+        p.drawPolygon(poly([(58, 38), (66, 36), (61, 44)]))
     elif mode == "busy":
         p.fillRect(QRectF(31, 9, SCREEN_W - 31, SCREEN_H - 9), C("#FFFFFF", 120))
         p.setBrush(Qt.BrushStyle.NoBrush)
@@ -981,39 +1179,53 @@ def draw_attribute_table(p, t):
 
 # ---------------------------------------------------------------- руки
 
-def solve_arm(sx, sy, tx, ty, outward):
-    """Локоть по плечу и кисти (две кости). outward — в какую сторону от тела локоть."""
-    dx, dy = tx - sx, ty - sy
+def quad_point(a, c, b, k):
+    """Точка квадратичной кривой a→b с контрольной точкой c."""
+    m = 1.0 - k
+    return (m * m * a[0] + 2 * m * k * c[0] + k * k * b[0],
+            m * m * a[1] + 2 * m * k * c[1] + k * k * b[1])
+
+
+def arm_curve(pose, left):
+    """Плечо, контрольная точка дуги и кисть. Дуга проходит через локоть."""
+    side = -1 if left else 1
+    s = (150.0 + pose["bdx"] + side * SHOULDER_DX, SHOULDER_Y + pose["bdy"])
+    prefix = "l" if left else "r"
+    h = (pose["h%sx" % prefix], pose["h%sy" % prefix])
+    dx, dy = h[0] - s[0], h[1] - s[1]
     dist = math.hypot(dx, dy) or 1e-3
-    reach = UPPER_ARM + FOREARM - 0.5
-    if dist > reach:
-        tx, ty = sx + dx / dist * reach, sy + dy / dist * reach
-        dist = reach
-    dist = max(dist, abs(UPPER_ARM - FOREARM) + 1.0)
-    ux, uy = dx / math.hypot(dx, dy), dy / math.hypot(dx, dy)
-    cos_a = (UPPER_ARM ** 2 + dist ** 2 - FOREARM ** 2) / (2 * UPPER_ARM * dist)
-    a = math.acos(max(-1.0, min(1.0, cos_a)))
-    best = None
-    for sign in (1, -1):
-        ca, sa = math.cos(a * sign), math.sin(a * sign)
-        ex = sx + UPPER_ARM * (ux * ca - uy * sa)
-        ey = sy + UPPER_ARM * (ux * sa + uy * ca)
-        # локоть — наружу и немного вниз
-        score = (ex - (sx + tx) / 2) * outward * 0.6 + (ey - (sy + ty) / 2)
-        if best is None or score > best[0]:
-            best = (score, ex, ey)
-    return best[1], best[2], tx, ty
+    # Локоть сам отходит от середины руки вниз и наружу (как под тяжестью) — тем дальше,
+    # чем сильнее рука согнута. Направление — «тяжесть», спроецированная поперёк руки:
+    # так оно меняется плавно, куда бы ни двигалась кисть, и локоть не перескакивает
+    sag = 0.8 * math.sqrt(max(0.0, (ARM_LENGTH / 2) ** 2 - (dist / 2) ** 2))
+    ux, uy = dx / dist, dy / dist
+    gx, gy = ELBOW_PULL[0] * side, ELBOW_PULL[1]
+    along = gx * ux + gy * uy
+    # у самого плеча направление руки скачет — там локоть просто свисает
+    near = min(1.0, dist / 34.0)
+    near = near * near * (3.0 - 2.0 * near)
+    nx = gx + (gx - along * ux - gx) * near
+    ny = gy + (gy - along * uy - gy) * near
+    bend = pose[prefix + "b"]
+    ex = (s[0] + h[0]) / 2 + nx * bend * sag
+    ey = (s[1] + h[1]) / 2 + ny * bend * sag
+    # …или стоит там, где его поставила анимация
+    w = pose[prefix + "ew"]
+    ex += (pose[prefix + "ex"] - ex) * w
+    ey += (pose[prefix + "ey"] - ey) * w
+    c = (2 * ex - (s[0] + h[0]) / 2, 2 * ey - (s[1] + h[1]) / 2)
+    return s, c, h
+
+
+def draw_arms(p, pet, pose):
+    draw_arm(p, pet, pose, left=True)
+    draw_arm(p, pet, pose, left=False)
 
 
 def draw_arm(p, pet, pose, left):
-    side = -1 if left else 1
-    sx = 150.0 + pose["bdx"] + side * SHOULDER_DX
-    sy = SHOULDER_Y + pose["bdy"]
-    hx, hy = (pose["hlx"], pose["hly"]) if left else (pose["hrx"], pose["hry"])
-    ex, ey, hx, hy = solve_arm(sx, sy, hx, hy, side)
-    path = QPainterPath(QPointF(sx, sy))
-    path.lineTo(QPointF(ex, ey))
-    path.lineTo(QPointF(hx, hy))
+    s, c, h = arm_curve(pose, left)
+    path = QPainterPath(QPointF(*s))
+    path.quadTo(QPointF(*c), QPointF(*h))
     fur = C(pet["fur"])
     p.setBrush(Qt.BrushStyle.NoBrush)
     if pet["clothes"] == "suit":
@@ -1023,33 +1235,61 @@ def draw_arm(p, pet, pose, left):
         p.setPen(pen(jacket, 10.5))
         p.drawPath(path)
         # манжета
-        k = 0.82
-        cx, cy = ex + (hx - ex) * k, ey + (hy - ey) * k
+        a, b = quad_point(s, c, h, 0.84), quad_point(s, c, h, 0.92)
         p.setPen(pen("#F2F2EE", 8.0, Qt.PenCapStyle.FlatCap))
-        p.drawLine(QPointF(cx, cy), QPointF(ex + (hx - ex) * 0.9, ey + (hy - ey) * 0.9))
+        p.drawLine(QPointF(*a), QPointF(*b))
     else:
         width = 10.0 if pet.get("chimp") else 8.5
         p.setPen(pen(fur.darker(150), width + 2))
         p.drawPath(path)
         p.setPen(pen(fur, width))
         p.drawPath(path)
-        # короткий рукав рубашки
-        k = 0.55
-        mx, my = sx + (ex - sx) * k, sy + (ey - sy) * k
+        # короткий рукав рубашки — начало той же дуги
+        k = 0.3
+        sleeve = QPainterPath(QPointF(*s))
+        mid = (s[0] + (c[0] - s[0]) * k, s[1] + (c[1] - s[1]) * k)
+        sleeve.quadTo(QPointF(*mid), QPointF(*quad_point(s, c, h, k)))
         p.setPen(pen("#B9B9B2", 14.5))
-        p.drawLine(QPointF(sx, sy), QPointF(mx, my))
+        p.drawPath(sleeve)
         p.setPen(pen("#F5F5F2", 12.5))
-        p.drawLine(QPointF(sx, sy), QPointF(mx, my))
-    # кисть
+        p.drawPath(sleeve)
+    draw_hand(p, pet, pose, h, math.degrees(math.atan2(h[1] - c[1], h[0] - c[0])), left)
+
+
+def draw_hand(p, pet, pose, at, angle, left):
     hand = C(pet["hand"])
-    angle = math.degrees(math.atan2(hy - ey, hx - ex))
+    outline = hand.darker(140)
+    x, y = at
+    side = -1 if left else 1
+    if not left and pose["rthumb"] > 0.5:
+        # кулак с большим пальцем вверх
+        fill(p, hand, outline, 0.8)
+        p.drawRoundedRect(QRectF(x - 5, y - 4, 10, 9), 3.5, 3.5)
+        p.drawRoundedRect(QRectF(x - 2.2, y - 12, 4.4, 9), 2.2, 2.2)
+        return
+    if not left and pose["rpeace"] > 0.5:
+        # «мир»: два пальца вверх
+        p.setPen(pen(outline, 4.4))
+        p.drawLine(QPointF(x - 1.5, y - 2), QPointF(x - 4.5, y - 11))
+        p.drawLine(QPointF(x + 1.5, y - 2), QPointF(x + 4.5, y - 11))
+        p.setPen(pen(hand, 2.8))
+        p.drawLine(QPointF(x - 1.5, y - 2), QPointF(x - 4.5, y - 11))
+        p.drawLine(QPointF(x + 1.5, y - 2), QPointF(x + 4.5, y - 11))
+        fill(p, hand, outline, 0.8)
+        ellipse(p, x, y + 1, 5, 4.6)
+        return
     p.save()
-    p.translate(hx, hy)
+    p.translate(x, y)
     p.rotate(angle)
-    fill(p, hand, hand.darker(140), 0.8)
+    fill(p, hand, outline, 0.8)
     p.drawEllipse(QRectF(-4.5, -4.8, 10, 9.6))
     ellipse(p, 1.0, -side * 4.4, 2.4, 2.0)  # большой палец
     p.restore()
+    if not left and pose["pen"] > 0.5:
+        p.setPen(pen("#2E4A86", 1.8))
+        p.drawLine(QPointF(x - 1, y - 6), QPointF(x - 5, y + 5))
+        p.setPen(pen("#1A1A1A", 1.0))
+        p.drawLine(QPointF(x - 5, y + 5), QPointF(x - 5.6, y + 6.6))
 
 
 # ---------------------------------------------------------------- значки
@@ -1128,3 +1368,34 @@ def draw_overlays(p, pet, pose, t):
         path.cubicTo(QPointF(sx - 3, sy + 3.5), QPointF(sx - 4, sy), QPointF(sx, sy - 5))
         fill(p, C("#8CC8F0", 230 * a), C("#4C8FD0", 230 * a), 0.8)
         p.drawPath(path)
+    if pose["check"] > 0.01:
+        # значок «сохранено»
+        a = pose["check"]
+        cx, cy = hx + 32, hy - 30
+        fill(p, C("#3E9E4A", 255 * a), C("#FFFFFF", 255 * a), 1.2)
+        ellipse(p, cx, cy, 7.5)
+        p.setPen(pen(C("#FFFFFF", 255 * a), 2.0))
+        p.drawPolyline(poly([(cx - 3.5, cy), (cx - 1, cy + 3), (cx + 4, cy - 3)]))
+    if pose["boardcheck"] > 0.01:
+        # ставит галочку в списке дел на доске
+        a = pose["boardcheck"]
+        p.setPen(pen(C("#D84B4B", 255 * a), 1.6))
+        p.drawPolyline(poly([(224, 50), (227, 54), (234, 45)]))
+        fill(p, C("#FFF3A0", 160 * a))
+        for i in range(4):
+            ang = t * 3 + i * math.pi / 2
+            ellipse(p, 230 + 9 * math.cos(ang), 49 + 7 * math.sin(ang), 1.2)
+    if pose["dots"] > 0.01:
+        # «…» — вздох, пока QGIS думает
+        a = pose["dots"]
+        bx, by = hx + 30, hy - 30
+        fill(p, C("#FFFFFF", 235 * a), C("#9A9A9A", 235 * a), 0.8)
+        p.drawRoundedRect(QRectF(bx - 10, by - 6, 20, 11), 5, 5)
+        p.drawPolygon(poly([(bx - 6, by + 4), (bx - 9, by + 9), (bx - 2, by + 5)]))
+        fill(p, C("#6A6A6A", 255 * a))
+        for i in range(3):
+            if (t * 3) % 3 >= i:
+                ellipse(p, bx - 5 + i * 5, by - 0.5, 1.4)
+    if pose["flash"] > 0.01:
+        # вспышка селфи
+        p.fillRect(QRectF(-2000, -2000, 4000, 4000), C("#FFFFFF", 200 * min(1.0, pose["flash"])))

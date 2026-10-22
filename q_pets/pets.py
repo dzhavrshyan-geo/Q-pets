@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Питомцы: внешний вид и любимое занятие каждого.
+"""Питомцы: внешний вид и любимые занятия каждого.
 
 Чтобы добавить питомца, достаточно добавить сюда описание: рисует их drawing.py,
-а «своё» занятие (special) — одна из анимаций в animation.py.
+а любимые занятия (specials) — анимации из animation.py.
 """
 
 PETS = [
@@ -28,7 +28,8 @@ PETS = [
         "phone": "#1E1E22",
         "desk_extra": "folders",
         "accent": "#E0679A",
-        "special": "tiger",
+        "specials": ["tiger", "tiger_play"],
+        "read_item": "paper",
         # Сосредоточенно высовывает язык, когда печатает
         "poses": {"typing": {"tongue": 1.0}},
     },
@@ -54,7 +55,8 @@ PETS = [
         "phone": "#F08FA9",
         "desk_extra": "penguin",
         "accent": "#E0679A",
-        "special": "daydream",
+        "specials": ["daydream", "dance"],
+        "read_item": "paper",
         "poses": {},
     },
     {
@@ -78,7 +80,8 @@ PETS = [
         "phone": "#3A3D44",
         "desk_extra": "books",
         "accent": "#5A9E3A",
-        "special": "ponder",
+        "specials": ["ponder", "plane"],
+        "read_item": "book",
         "chimp": True,
         "poses": {},
     },

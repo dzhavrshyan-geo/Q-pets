@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 try:
     import qgis_shim  # noqa: F401
-    from PyQt5.QtCore import QEvent, QObject, QSettings, Qt, pyqtSignal
-    from PyQt5.QtGui import QImage, QKeyEvent, QPainter
+    from PyQt5.QtCore import QEvent, QObject, QPoint, QPointF, QSettings, Qt, pyqtSignal
+    from PyQt5.QtGui import QImage, QKeyEvent, QPainter, QWheelEvent
     from PyQt5.QtWidgets import QApplication, QLineEdit, QMainWindow
 except ImportError:  # pragma: no cover
     QApplication = None
@@ -114,6 +114,45 @@ class DrawingTest(unittest.TestCase):
                         p.end()
 
 
+    def test_arms_move_smoothly(self):
+        """Локти и кисти не перескакивают: ни внутри анимаций, ни при прерывании их работой."""
+        import math
+        import random
+        from q_pets.animation import ACTIVITIES, Animator
+        from q_pets.drawing import arm_curve
+        from q_pets.pets import PETS
+
+        def joints(pose):
+            points = []
+            for left in (True, False):
+                s, c, h = arm_curve(pose, left)
+                points += [((c[0] + (s[0] + h[0]) / 2) / 2, (c[1] + (s[1] + h[1]) / 2) / 2), h]
+            return points
+
+        def worst_step(poses):
+            frames = [joints(p) for p in poses]
+            return max(math.hypot(a[0] - b[0], a[1] - b[1])
+                       for f0, f1 in zip(frames, frames[1:]) for a, b in zip(f0, f1))
+
+        dt = 1 / 25.0
+        rnd = random.Random(3)
+        pet = PETS[0]
+        for name, activity in ACTIVITIES.items():
+            duration = activity.duration or 12.0
+            anim = Animator(pet)
+            anim.play(name, 0.0)
+            poses = [anim.pose(i * dt) for i in range(int(duration / dt) + 1)]
+            self.assertLess(worst_step(poses), 25.0, name)
+            for target in ("typing", "mouse"):
+                cut = rnd.uniform(0.3, duration)
+                anim = Animator(pet)
+                anim.play(name, 0.0)
+                poses = [anim.pose(cut - dt)]
+                anim.play(target, cut)
+                poses += [anim.pose(cut + i * dt) for i in range(30)]
+                self.assertLess(worst_step(poses), 25.0, (name, target, cut))
+
+
 @unittest.skipIf(QApplication is None, "нужен PyQt5")
 class PluginTest(unittest.TestCase):
 
@@ -176,6 +215,29 @@ class PluginTest(unittest.TestCase):
             QEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier, "a"))
         self.assertEqual(brain.last_key, -1e9)
 
+    def test_wheel_and_shortcuts(self):
+        self.start_qgis()
+        brain = self.plugin.panel.brain
+        editor = self.iface.editor
+        wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, 120),
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                            Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(editor, wheel)
+        self.assertEqual(brain.update(time.monotonic()), "scroll")
+        ctrl = Qt.KeyboardModifier.ControlModifier
+        # Ctrl+S приходит и как ShortcutOverride, и как KeyPress — реакция одна
+        for etype in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress):
+            QApplication.sendEvent(editor, QKeyEvent(etype, Qt.Key.Key_S, ctrl, ""))
+        self.assertEqual(brain.pending_reaction, "saved")
+        self.assertEqual(brain.update(time.monotonic()), "saved")
+        QApplication.sendEvent(editor, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_S, ctrl, ""))
+        self.assertIsNone(brain.pending_reaction)
+        QApplication.sendEvent(editor, QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Z, ctrl | Qt.KeyboardModifier.ShiftModifier, ""))
+        self.assertIsNone(brain.pending_reaction)  # Ctrl+Shift+Z — это «вернуть»
+        QApplication.sendEvent(editor, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Z, ctrl, ""))
+        self.assertEqual(brain.pending_reaction, "oops")
+
     def test_busy_qgis(self):
         self.start_qgis()
         view = self.plugin.panel.view
@@ -190,7 +252,7 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(view.brain.animator.name, "thinking")
         QgsApplication.task_manager.active = 0
         view.tick()
-        self.assertEqual(view.brain.animator.name, "focus")
+        self.assertEqual(view.brain.animator.name, "read")
 
     def test_paints_and_pokes(self):
         self.start_qgis()

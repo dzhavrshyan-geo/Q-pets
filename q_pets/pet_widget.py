@@ -167,11 +167,11 @@ class PetPanel(QWidget):
 
     # -------------------------------------------------- события QGIS
 
-    def key_pressed(self):
-        self.brain.key(time.monotonic())
+    def key_pressed(self, combo=None):
+        self.brain.key(time.monotonic(), combo)
 
-    def mouse_used(self):
-        self.brain.mouse(time.monotonic())
+    def mouse_used(self, wheel=False):
+        self.brain.mouse(time.monotonic(), wheel)
 
     # -------------------------------------------------- настройки
 

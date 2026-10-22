@@ -21,12 +21,18 @@ from q_pets.animation import ACTIVITIES, Animator  # noqa: E402
 from q_pets.drawing import H, W, draw_scene  # noqa: E402
 from q_pets.pets import PETS  # noqa: E402
 
-SHOTS = [
-    ("typing", 0.3), ("mouse", 1.0), ("focus", 6.0), ("thinking", 5.0),
-    ("window", 4.0), ("phone", 4.0), ("coffee", 3.0), ("coffee", 5.5),
-    ("stretch", 2.0), ("nap", 2.0), ("wake", 0.3), ("wave", 0.5),
-]
-SPECIAL_TIMES = (4.0, 8.0)
+# Самые выразительные моменты каждой анимации (секунды от начала)
+MOMENTS = {
+    "typing": (0.3, 3.15), "mouse": (1.0,), "scroll": (1.0,), "thinking": (3.0, 12.5),
+    "read": (2.0,), "chin": (3.0,), "scratch": (2.0,), "lean": (2.5,), "notes": (2.5,),
+    "neck": (1.5,), "window": (4.0,), "phone": (1.6, 4.0), "coffee": (1.7, 2.6, 4.2, 6.2),
+    "stretch": (0.9, 2.0), "banana": (1.8, 2.8, 5.0, 8.2), "read_doc": (1.6, 4.0),
+    "selfie": (3.2, 6.5), "relax": (3.0,), "board": (3.2,), "nap": (2.0,), "wake": (0.3,),
+    "wave": (0.5,), "saved": (0.8,), "oops": (0.8,),
+    "tiger": (4.0,), "tiger_play": (3.0,), "daydream": (4.0,), "dance": (3.0,),
+    "ponder": (8.0,), "plane": (1.5, 3.2, 4.8),
+}
+SPECIALS = {"tiger", "tiger_play", "daydream", "dance", "ponder", "plane"}
 
 
 def render(pet, name, t, width, hour=12):
@@ -43,8 +49,9 @@ def render(pet, name, t, width, hour=12):
 
 
 def sheet(pet, width, out):
-    shots = SHOTS + [(pet["special"], s) for s in SPECIAL_TIMES]
-    cols = 4
+    shots = [(name, t) for name, times in MOMENTS.items()
+             if name not in SPECIALS or name in pet["specials"] for t in times]
+    cols = 6
     rows = (len(shots) + cols - 1) // cols
     cell_h = int(width * H / W) + 14
     img = QImage(cols * width, rows * cell_h, QImage.Format.Format_ARGB32)
@@ -65,10 +72,9 @@ def sheet(pet, width, out):
 
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
-    width = int(sys.argv[2]) if len(sys.argv) > 2 else 400
+    width = int(sys.argv[2]) if len(sys.argv) > 2 else 320
     os.makedirs(out, exist_ok=True)
     app = QApplication(sys.argv[:1])
     for pet in PETS:
         sheet(pet, width, out)
-        render(pet, "focus", 0.5, 960).save(os.path.join(out, "big_%s.png" % pet["key"]))
     print("готово:", out)
