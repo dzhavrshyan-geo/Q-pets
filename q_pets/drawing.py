@@ -13,7 +13,7 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import (QBrush, QFont, QLinearGradient, QPainter, QPainterPath,
                              QRadialGradient, QTransform)
 
-from .animation import STICKY
+from .animation import BANANA_DESK, MUG_DESK, PHONE_DESK, STICKY
 from .heads import draw_glasses, draw_head, mouth_point
 from .paint import C, ellipse, fill, head_center, pen, poly
 from .visitors_draw import boss_speech_anchor, draw_boss, draw_bubble, draw_fox, fox_thought_anchor
@@ -26,11 +26,14 @@ SHOULDER_DX, SHOULDER_Y = 23.0, 128.0
 ARM_LENGTH = 72.0  # длина руки: чем ближе кисть к плечу, тем сильнее изгиб
 ELBOW_PULL = (0.6, 1.0)  # куда тянется локоть: наружу и вниз
 
-# Экран монитора: прямоугольник содержимого → четырёхугольник в сцене (монитор
-# развёрнут к питомцу, поэтому правый край чуть дальше и меньше)
+# Экран монитора: прямоугольник содержимого → четырёхугольник в сцене. Монитор стоит
+# справа от питомца и развёрнут к нему: левый край (у питомца) дальше от зрителя и ниже,
+# правый ближе и выше, а справа виден торец корпуса
 SCREEN_W, SCREEN_H = 120.0, 80.0
-SCREEN_QUAD = [(206.0, 67.0), (300.0, 74.0), (300.0, 137.0), (206.0, 146.0)]
-BEZEL_QUAD = [(202.0, 62.0), (304.0, 70.0), (304.0, 141.0), (202.0, 151.0)]
+BEZEL_QUAD = [(214.0, 72.0), (300.0, 58.0), (300.0, 152.0), (214.0, 139.0)]
+SCREEN_QUAD = [(218.0, 76.0), (296.0, 63.5), (296.0, 147.0), (218.0, 135.0)]
+MONITOR_SIDE = [(300.0, 58.0), (307.0, 61.5), (307.0, 149.0), (300.0, 152.0)]
+MONITOR_TOP = (257.0, 65.0, math.degrees(math.atan2(58.0 - 72.0, 300.0 - 214.0)))
 
 # ====================================================================== сцена
 
@@ -57,10 +60,17 @@ def draw_scene(p, pet, pose, ctx):
         draw_tiger(p, pose, t)
     draw_desk(p)
     draw_desk_items(p, pet, pose, ctx)
+    draw_props(p, pet, pose, t, held=False)  # вещи, лежащие на столе
     if has_tiger:
         draw_tiger_paws(p, pose, t)
-    if not arms_back:
-        draw_arms(p, pet, pose)
+    if arms_back:
+        draw_props(p, pet, pose, t, held=True)
+    else:
+        # слои: руки → вещь в руках → пальцы поверх неё
+        # (иначе плечо ложится поверх кружки или книги, и вещь «проходит сквозь» питомца)
+        draw_arms(p, pet, pose, hands=False)
+        draw_props(p, pet, pose, t, held=True)
+        draw_hands(p, pet, pose)
     if pose["toy"] > 0.01:
         draw_toy(p, pose, t)
     if pose["spin"] > 0.01:
@@ -526,11 +536,28 @@ def draw_desk_items(p, pet, pose, ctx):
     draw_keyboard(p, ctx)
     draw_mouse(p, pose)
     draw_sticky(p)
-    # вещи, которые питомец берёт в руки (рисуются до рук — ладони поверх)
-    draw_read_item(p, pet, pose)
-    draw_banana(p, pose)
-    draw_phone(p, pet, pose)
-    draw_mug(p, pet, pose, t)
+
+
+def _moved(pose, keys, spot):
+    return any(abs(pose[k] - v) > 0.5 for k, v in zip(keys, spot))
+
+
+def draw_props(p, pet, pose, t, held):
+    """Вещи, которые питомец берёт в руки. held=False — те, что лежат на столе (под руками),
+    held=True — те, что в руках или в полёте (над руками, но под пальцами)."""
+    mug_held = _moved(pose, ("mugx", "mugy", "mugrot"), MUG_DESK + (0.0,))
+    phone_held = pose["phup"] > 0.05 or _moved(pose, ("phx", "phy"), PHONE_DESK)
+    banana_held = _moved(pose, ("bnx", "bny", "bnrot"), BANANA_DESK)
+    if held:
+        draw_read_item(p, pet, pose)
+    if banana_held == held:
+        draw_banana(p, pose)
+    if phone_held == held:
+        draw_phone(p, pet, pose)
+    if mug_held == held:
+        draw_mug(p, pet, pose, t)
+    if not held:
+        return
     draw_plane(p, pose)
     if pose["glassoff"] > 0.5 and pet.get("glasses"):
         mx, my = (pose["hlx"] + pose["hrx"]) / 2, (pose["hly"] + pose["hry"]) / 2 - 3
@@ -581,14 +608,19 @@ def draw_cactus(p):
 
 def draw_webcam(p, t):
     """Веб-камера на мониторе (как у Дениса дома)."""
+    x, y, angle = MONITOR_TOP
+    p.save()
+    p.translate(x, y - 3.5)
+    p.rotate(angle)
     fill(p, "#1E1F24", "#0C0C10", 0.6)
-    p.drawRoundedRect(QRectF(242, 55, 22, 8), 3.5, 3.5)
+    p.drawRoundedRect(QRectF(-11, -4, 22, 8), 3.5, 3.5)
     fill(p, "#3A4A66")
-    ellipse(p, 253, 59, 2.6)
+    ellipse(p, 0, 0, 2.6)
     fill(p, "#0C0C10")
-    ellipse(p, 253, 59, 1.3)
+    ellipse(p, 0, 0, 1.3)
     fill(p, "#4FC3F7" if int(t * 1.2) % 4 else "#1B6E95")
-    ellipse(p, 260.5, 59, 0.9)
+    ellipse(p, 7.5, 0, 0.9)
+    p.restore()
 
 
 def draw_folders(p):
@@ -1027,9 +1059,15 @@ _SCREEN_TRANSFORM = []
 
 
 def draw_monitor(p, ctx):
+    # подставка: ножка от середины низа экрана к основанию на столе
     fill(p, "#26262B", "#151518", 0.8)
-    p.drawRect(QRectF(248, 146, 10, 21))
-    ellipse(p, 253, 169, 21, 4.2)
+    ellipse(p, 262, 170, 19, 4.2)
+    p.drawPolygon(poly([(255, 140), (264, 141), (266, 169), (258, 169)]))
+    fill(p, "#34343A")
+    ellipse(p, 262, 169, 6, 1.6)
+    # торец корпуса и рамка
+    fill(p, "#2E2E34", "#0D0D10", 0.8)
+    p.drawPolygon(poly(MONITOR_SIDE))
     fill(p, "#1D1D21", "#0D0D10", 1.0)
     p.drawPolygon(poly(BEZEL_QUAD))
     if not _SCREEN_TRANSFORM:
@@ -1041,7 +1079,7 @@ def draw_monitor(p, ctx):
     p.restore()
     # блик
     fill(p, C("#FFFFFF", 22))
-    p.drawPolygon(poly([(206, 67), (246, 70), (222, 145), (206, 146)]))
+    p.drawPolygon(poly([(218, 76), (252, 70.5), (234, 132.5), (218, 135)]))
 
 
 # Кварталы на карте: неровная сетка, раскрашенная как карта лесоустройства
@@ -1236,12 +1274,18 @@ def arm_curve(pose, left):
     return s, c, h
 
 
-def draw_arms(p, pet, pose):
-    draw_arm(p, pet, pose, left=True)
-    draw_arm(p, pet, pose, left=False)
+def draw_arms(p, pet, pose, hands=True):
+    draw_arm(p, pet, pose, left=True, hand=hands)
+    draw_arm(p, pet, pose, left=False, hand=hands)
 
 
-def draw_arm(p, pet, pose, left):
+def draw_hands(p, pet, pose):
+    for left in (True, False):
+        s, c, h = arm_curve(pose, left)
+        draw_hand(p, pet, pose, h, math.degrees(math.atan2(h[1] - c[1], h[0] - c[0])), left)
+
+
+def draw_arm(p, pet, pose, left, hand=True):
     s, c, h = arm_curve(pose, left)
     path = QPainterPath(QPointF(*s))
     path.quadTo(QPointF(*c), QPointF(*h))
@@ -1275,7 +1319,8 @@ def draw_arm(p, pet, pose, left):
         p.drawPath(sleeve)
         p.setPen(pen("#F5F5F2", 12.5))
         p.drawPath(sleeve)
-    draw_hand(p, pet, pose, h, math.degrees(math.atan2(h[1] - c[1], h[0] - c[0])), left)
+    if hand:
+        draw_hand(p, pet, pose, h, math.degrees(math.atan2(h[1] - c[1], h[0] - c[0])), left)
 
 
 def draw_hand(p, pet, pose, at, angle, left):

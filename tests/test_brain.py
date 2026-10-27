@@ -401,11 +401,16 @@ class QuizTest(unittest.TestCase):
     def test_bundled_questions_are_well_formed(self):
         from q_pets.quiz_questions import QUESTIONS
         ids = [q["id"] for q in QUESTIONS]
-        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(sorted(ids), list(range(1, 101)))  # ровно 100 вопросов
+        self.assertEqual(len(set(q["q"] for q in QUESTIONS)), 100)
         for q in QUESTIONS:
             self.assertEqual(len(q["options"]), 4, q["id"])
             self.assertEqual(len(set(q["options"])), 4, q["id"])
             self.assertTrue(q["q"].strip())
+            self.assertTrue(q["ref"])
+            self.assertLessEqual(len(q["q"]), 140, q["id"])  # помещается в окошко
+            for option in q["options"]:
+                self.assertLessEqual(len(option), 70, (q["id"], option))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ name=Q-pets
 qgisMinimumVersion=3.16
 supportsQt6=True
 description=Питомец, который работает вместе с вами в QGIS: обезьянки, лягушонок и плюшевый лев
-version=0.3.0
+version=0.4.0
 author=Robert Dzhavrhsyan
 email=dzhavrshyan.gg@gmail.com
 
