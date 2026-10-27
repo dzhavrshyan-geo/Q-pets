@@ -2,25 +2,35 @@
 """Поведение питомца (без Qt): что он делает в зависимости от действий пользователя.
 
 Порядок важности:
-1. реакция (помахать после щелчка, «сохранено» на Ctrl+S, «ой» на Ctrl+Z, проснуться);
-2. только что нажимали клавиши или мышь — печатает, водит мышкой или крутит колёсико;
-3. QGIS занят дольше BUSY_DELAY — ждёт вместе с QGIS;
-4. простой меньше idle_timeout — работает без нажатий (читает экран, пишет заметки…);
-5. дольше — занимается своими делами, а после nap_after — дремлет.
+1. реакция (помахать после щелчка, «сохранено» на Ctrl+S, «ой» на Ctrl+Z, проснуться,
+   испугаться начальника) и уход из кабинета — доигрываются до конца;
+2. в кабинете начальник — питомец слушает его или изо всех сил печатает;
+3. только что нажимали клавиши или мышь — печатает, водит мышкой или крутит колёсико;
+4. QGIS занят дольше BUSY_DELAY — ждёт вместе с QGIS;
+5. простой меньше idle_timeout — работает без нажатий (читает экран, пишет заметки…);
+6. дольше — занимается своими делами (иногда выходит из кабинета на 15–60 с),
+   а после nap_after — дремлет.
 """
 
 import random
 
-from .animation import FOCUS, IDLE_COMMON, REACTIONS, Animator
+from .animation import ACTIVITIES, AWAY, FOCUS, IDLE_COMMON, REACTIONS, Animator
+from .visitors import Boss, Fox
 
 WORK_HOLD = 1.2   # сек.: столько ещё печатает/водит мышкой после последнего нажатия
 BUSY_DELAY = 0.7  # сек.: короткая перерисовка карты не отвлекает питомца
 COMBOS = {"save": "saved", "undo": "oops"}
+AWAY_TIME = (15.0, 60.0)  # сек.: сколько питомца нет в кабинете (вместе с уходом и возвращением)
+LEAVE_WEIGHT = 0.5        # выходит из кабинета реже, чем занимается другими делами
+# Застать за этим — значит застать бездельничающим
+SLACKING = set(IDLE_COMMON) | {"nap", "wake", "nod_off", "tiger", "tiger_play", "daydream",
+                               "dance", "ponder", "plane", "fly", "glasses", "mane", "roar"}
 
 
 class PetBrain:
 
-    def __init__(self, pet, idle_timeout=15.0, nap_after=180.0, rng=None, now=0.0):
+    def __init__(self, pet, idle_timeout=15.0, nap_after=180.0, rng=None, now=0.0,
+                 boss=True, fox=True, can_leave=True):
         self.rng = rng or random.Random()
         self.pet = pet
         self.animator = Animator(pet, self.rng)
@@ -30,6 +40,11 @@ class PetBrain:
         self.last_activity = now
         self.busy_since = None
         self.pending_reaction = None
+        self.can_leave = can_leave  # иногда выходить из кабинета
+        self.back_at = None       # когда вернуться в кабинет
+        self.boss_mode = None     # None / "caught" / "listen" / "away"
+        self.boss = Boss(self.rng, now, boss)
+        self.fox = Fox(self.rng, now, fox)
         self.update(now)
 
     # -------------------------------------------------- события
@@ -79,16 +94,72 @@ class PetBrain:
             return "nap"
         return "idle"
 
+    # -------------------------------------------------- начальник
+
+    def boss_check(self, now):
+        """Начальник вошёл и смотрит, чем занят питомец."""
+        name = self.animator.name
+        if name in ("leave", "gone"):
+            self.boss_mode = "away"
+            return "away"
+        if name in SLACKING:
+            self.boss_mode = "caught"
+            self.pending_reaction = "startle"
+            return "caught"
+        self.boss_mode = "listen"
+        return "working"
+
+    def boss_left(self, now):
+        if self.boss_mode in ("caught", "listen"):
+            self.last_activity = now  # после разговора ещё поработает
+        self.boss_mode = None
+
+    @property
+    def away(self):
+        return self.animator.name in AWAY
+
+    # -------------------------------------------------- решение
+
     def update(self, now):
+        self.boss.update(now, self)
+        self.fox.update(now, self, self.boss.present)
+        return self.decide(now)
+
+    def decide(self, now):
         anim = self.animator
         current = anim.name
 
         if self.pending_reaction:
-            anim.play(self.pending_reaction, now)
-            self.pending_reaction = None
-            return anim.name
+            if current in AWAY and self.pending_reaction != "startle":
+                self.pending_reaction = None  # питомца нет на месте — махать некому
+            else:
+                anim.play(self.pending_reaction, now)
+                self.pending_reaction = None
+                return anim.name
         if current in REACTIONS and not anim.finished(now):
             return current
+
+        # вышел из кабинета: ушёл → пусто → вернулся
+        if current == "leave":
+            anim.play("gone", now)
+            total = self.rng.uniform(*AWAY_TIME)
+            walking = ACTIVITIES["leave"].duration + ACTIVITIES["return"].duration
+            self.back_at = now + max(5.0, total - walking)
+            return "gone"
+        if current == "gone":
+            if self.boss_mode == "away":
+                return current  # при начальнике не возвращается
+            if now >= self.back_at or self.wanted(now) not in ("idle", "nap"):
+                anim.play("return", now)
+                return "return"
+            return current
+
+        if self.boss_mode == "caught":
+            anim.play("fake_typing", now)
+            return "fake_typing"
+        if self.boss_mode == "listen":
+            anim.play("listen", now)
+            return "listen"
 
         name = self.wanted(now)
         if current == "nap" and name != "nap":
@@ -106,14 +177,15 @@ class PetBrain:
     def choices(self, group):
         if group == "focus":
             return list(FOCUS)
-        return IDLE_COMMON + list(self.pet["specials"])
+        return IDLE_COMMON + list(self.pet["specials"]) + (["leave"] if self.can_leave else [])
 
     def idle_choices(self):
         return self.choices("idle")
 
     def pick(self, group, choices):
         options = [n for n in choices if n != self.animator.name]
-        weights = [1.5 if n in self.pet["specials"] else 1.0 for n in options]
+        weights = [1.5 if n in self.pet["specials"] else LEAVE_WEIGHT if n == "leave" else 1.0
+                   for n in options]
         return self.rng.choices(options, weights)[0]
 
     # -------------------------------------------------- для рисования
@@ -125,3 +197,6 @@ class PetBrain:
 
     def screen(self):
         return self.animator.activity.screen
+
+    def visitors(self, now):
+        return {"boss": self.boss.render(now), "fox": self.fox.render(now)}

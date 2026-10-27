@@ -31,8 +31,14 @@ MOMENTS = {
     "wave": (0.5,), "saved": (0.8,), "oops": (0.8,),
     "tiger": (4.0,), "tiger_play": (3.0,), "daydream": (4.0,), "dance": (3.0,),
     "ponder": (8.0,), "plane": (1.5, 3.2, 4.8),
+    "pen_spin": (2.0,), "nod_off": (2.4, 2.8), "call": (4.0,), "juggle": (3.0,),
+    "paper_ball": (1.0, 2.6, 3.4, 4.5), "yawn": (2.0,), "sneeze": (1.6,), "dumbbell": (2.2, 3.0),
+    "leave": (0.9, 2.0), "gone": (1.0,), "return": (1.2, 2.8),
+    "startle": (0.3,), "fake_typing": (2.0,), "listen": (1.0,),
+    "fly": (3.0, 6.1, 6.25, 8.0), "glasses": (3.0, 7.6), "mane": (2.0, 5.6), "roar": (1.8, 3.6),
 }
-SPECIALS = {"tiger", "tiger_play", "daydream", "dance", "ponder", "plane"}
+SPECIALS = {"tiger", "tiger_play", "daydream", "dance", "ponder", "plane", "fly", "glasses",
+            "mane", "roar"}
 
 
 def render(pet, name, t, width, hour=12):

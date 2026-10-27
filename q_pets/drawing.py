@@ -10,10 +10,13 @@ import math
 import random
 
 from qgis.PyQt.QtCore import QPointF, QRectF, Qt
-from qgis.PyQt.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath,
-                             QPen, QPolygonF, QRadialGradient, QTransform)
+from qgis.PyQt.QtGui import (QBrush, QFont, QLinearGradient, QPainter, QPainterPath,
+                             QRadialGradient, QTransform)
 
 from .animation import STICKY
+from .heads import draw_glasses, draw_head, mouth_point
+from .paint import C, ellipse, fill, head_center, pen, poly
+from .visitors_draw import boss_speech_anchor, draw_boss, draw_bubble, draw_fox, fox_thought_anchor
 
 W, H = 320.0, 240.0
 DESK_Y = 164.0      # задний край столешницы
@@ -29,43 +32,6 @@ SCREEN_W, SCREEN_H = 120.0, 80.0
 SCREEN_QUAD = [(206.0, 67.0), (300.0, 74.0), (300.0, 137.0), (206.0, 146.0)]
 BEZEL_QUAD = [(202.0, 62.0), (304.0, 70.0), (304.0, 141.0), (202.0, 151.0)]
 
-INK = QColor("#3A2A22")
-NO_PEN = Qt.PenStyle.NoPen
-ROUND = Qt.PenCapStyle.RoundCap
-
-
-def C(color, alpha=None):
-    c = QColor(color)
-    if alpha is not None:
-        c.setAlpha(max(0, min(255, int(alpha))))
-    return c
-
-
-def pen(color, width=1.0, cap=ROUND):
-    p = QPen(QColor(color), width)
-    p.setCapStyle(cap)
-    p.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    return p
-
-
-def poly(points):
-    return QPolygonF([QPointF(x, y) for x, y in points])
-
-
-def fill(p, color, outline=None, width=1.0):
-    p.setBrush(QBrush(C(color)) if not isinstance(color, (QBrush, QLinearGradient,
-                                                         QRadialGradient)) else QBrush(color))
-    p.setPen(pen(outline, width) if outline is not None else NO_PEN)
-
-
-def ellipse(p, x, y, rx, ry=None):
-    p.drawEllipse(QPointF(x, y), rx, rx if ry is None else ry)
-
-
-def head_center(pose):
-    return (150.0 + pose["bdx"] + pose["turn"] * 2.0, 86.0 + pose["hdy"] + pose["bdy"])
-
-
 # ====================================================================== сцена
 
 def draw_scene(p, pet, pose, ctx):
@@ -74,15 +40,19 @@ def draw_scene(p, pet, pose, ctx):
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     t = ctx["t"]
     has_tiger = "tiger" in pet["specials"]
-    arms_back = pose["armsback"] > 0.5  # руки за головой
+    # руки за головой — или питомец ушёл за монитор: тогда руки тоже позади вещей на столе
+    arms_back = pose["armsback"] > 0.5 or pose["bdx"] > 20
+    boss = ctx.get("boss")
     draw_room(p, pet, ctx)
+    if boss:
+        draw_boss(p, boss)
     draw_chair(p, pet)
     if pet.get("tail"):
-        draw_tail(p, pet, t)
+        draw_tail(p, pet, pose, t)
     draw_body(p, pet, pose)
     if arms_back:
         draw_arms(p, pet, pose)
-    draw_head(p, pet, pose)
+    draw_head(p, pet, pose, t)
     if has_tiger:
         draw_tiger(p, pose, t)
     draw_desk(p)
@@ -93,7 +63,26 @@ def draw_scene(p, pet, pose, ctx):
         draw_arms(p, pet, pose)
     if pose["toy"] > 0.01:
         draw_toy(p, pose, t)
+    if pose["spin"] > 0.01:
+        draw_spinning_pen(p, pose, t)
+    if pose["jug"] > 0.01:
+        draw_juggling(p, pose, t)
+    if pose["fly"] > 0.01 or pose["ftongue"] > 0.01:
+        draw_fly_and_tongue(p, pet, pose, t)
     draw_overlays(p, pet, pose, t)
+    draw_speech(p, pose, ctx)
+
+
+def draw_speech(p, pose, ctx):
+    """Реплики начальника и питомца, мысли лисы."""
+    boss, fox = ctx.get("boss"), ctx.get("fox")
+    if boss:
+        draw_bubble(p, boss["say"], boss_speech_anchor(boss), boss["say_a"])
+        hx, hy = head_center(pose)
+        draw_bubble(p, boss["reply"], (hx + 20, hy - 30), boss["reply_a"], max_w=90)
+    if fox:
+        draw_bubble(p, fox["think"], fox_thought_anchor(fox), fox["think_a"], thought=True,
+                    max_w=104)
 
 
 # ---------------------------------------------------------------- комната
@@ -177,6 +166,8 @@ def draw_window(p, ctx):
         path.quadTo(QPointF(bx - 2, by - 1), QPointF(bx, by))
         path.quadTo(QPointF(bx + 2, by - 1), QPointF(bx + 4, by - wing))
         p.drawPath(path)
+    if ctx.get("fox"):
+        draw_fox(p, ctx["fox"])  # лиса выглядывает из-за ёлок
     p.restore()
     # рама, перекладины, подоконник
     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -260,7 +251,7 @@ def draw_chair(p, pet):
     path.quadTo(QPointF(184, 166), QPointF(174, 160))
     path.lineTo(QPointF(170, 100))
     path.closeSubpath()
-    color = "#EBAFBF" if kind == "fuzzy" else "#F2A9BE"
+    color = {"fuzzy": "#EBAFBF", "penguins": "#F2A9BE", "forest": "#2E4A3A"}[kind]
     fill(p, color, C(color).darker(125), 1.0)
     p.drawPath(path)
     p.save()
@@ -271,6 +262,17 @@ def draw_chair(p, pet):
         for _ in range(40):
             x, y = rnd.uniform(166, 194), rnd.uniform(84, 164)
             p.drawLine(QPointF(x, y), QPointF(x + rnd.uniform(-1.5, 1.5), y + 2))
+    elif kind == "forest":
+        # вязаный плед с ёлочками
+        fill(p, "#7E9C86")
+        for row in range(5):
+            for col in range(2):
+                x = 176 + col * 9 + (row % 2) * 4
+                y = 100 + row * 13
+                p.drawPolygon(poly([(x, y - 5), (x - 3.5, y + 3), (x + 3.5, y + 3)]))
+        p.setPen(pen(C("#FFFFFF", 30), 0.8))
+        for y in range(88, 164, 4):
+            p.drawLine(QPointF(164, y), QPointF(196, y + 1))
     else:
         for row in range(5):
             for col in range(2):
@@ -285,17 +287,35 @@ def draw_chair(p, pet):
     p.restore()
 
 
-def draw_tail(p, pet, t):
+def draw_tail(p, pet, pose, t):
     sway = 3.0 * math.sin(t * 1.3)
-    path = QPainterPath(QPointF(176, 158))
-    path.cubicTo(QPointF(200, 158 + sway * 0.3), QPointF(206 + sway, 128),
-                 QPointF(196 + sway, 116))
-    path.quadTo(QPointF(188 + sway, 110), QPointF(186 + sway * 0.8, 118))
+    p.save()
+    p.translate(pose["bdx"], pose["bdy"])  # хвост уходит вместе с хозяином
     p.setBrush(Qt.BrushStyle.NoBrush)
-    p.setPen(pen(C(pet["fur"]).darker(150), 7.0))
-    p.drawPath(path)
-    p.setPen(pen(pet["fur"], 5.0))
-    p.drawPath(path)
+    if pet.get("kind") == "lion":
+        # тонкий плюшевый хвост с кисточкой
+        path = QPainterPath(QPointF(176, 158))
+        path.cubicTo(QPointF(198, 160), QPointF(204 + sway, 136), QPointF(198 + sway, 120))
+        p.setPen(pen(C(pet["fur"]).darker(140), 5.0))
+        p.drawPath(path)
+        p.setPen(pen(pet["fur"], 3.4))
+        p.drawPath(path)
+        fill(p, pet["mane"], C(pet["mane"]).darker(130), 0.8)
+        p.save()
+        p.translate(198 + sway, 118)
+        p.rotate(-20 + sway * 3)
+        p.drawEllipse(QRectF(-4, -6, 8, 11))
+        p.restore()
+    else:
+        path = QPainterPath(QPointF(176, 158))
+        path.cubicTo(QPointF(200, 158 + sway * 0.3), QPointF(206 + sway, 128),
+                     QPointF(196 + sway, 116))
+        path.quadTo(QPointF(188 + sway, 110), QPointF(186 + sway * 0.8, 118))
+        p.setPen(pen(C(pet["fur"]).darker(150), 7.0))
+        p.drawPath(path)
+        p.setPen(pen(pet["fur"], 5.0))
+        p.drawPath(path)
+    p.restore()
 
 
 # ---------------------------------------------------------------- тело
@@ -306,14 +326,21 @@ def draw_body(p, pet, pose):
     fur = C(pet["fur"])
     fill(p, fur)
     ellipse(p, cx, top - 2, 9, 7)  # шея
-    path = QPainterPath(QPointF(cx - 25, DESK_Y + 12))
+    # туловище длинное: когда питомец встаёт, ниже стола всё равно не пусто
+    bottom = top + 110
+    path = QPainterPath(QPointF(cx - 25, bottom))
     path.lineTo(QPointF(cx - 26, top + 14))
     path.quadTo(QPointF(cx - 26, top + 2), QPointF(cx - 13, top))
     path.lineTo(QPointF(cx + 13, top))
     path.quadTo(QPointF(cx + 26, top + 2), QPointF(cx + 26, top + 14))
-    path.lineTo(QPointF(cx + 25, DESK_Y + 12))
+    path.lineTo(QPointF(cx + 25, bottom))
     path.closeSubpath()
-    if pet["clothes"] == "suit":
+    clothes = pet["clothes"]
+    if clothes == "sweater":
+        draw_sweater(p, pet, path, cx, top)
+    elif clothes == "plush":
+        draw_plush_body(p, pet, path, cx, top)
+    elif clothes == "suit":
         jacket = C(pet["jacket"])
         fill(p, jacket, jacket.darker(140), 1.0)
         p.drawPath(path)
@@ -339,231 +366,58 @@ def draw_body(p, pet, pose):
         p.drawPolygon(poly([(cx - 10, top - 1), (cx - 1, top + 2), (cx - 6, top + 8)]))
         p.drawPolygon(poly([(cx + 10, top - 1), (cx + 1, top + 2), (cx + 6, top + 8)]))
         p.setPen(pen("#C7C7C0", 0.8))
-        p.drawLine(QPointF(cx + 0.5, top + 36), QPointF(cx + 0.5, DESK_Y))
+        p.drawLine(QPointF(cx + 0.5, top + 36), QPointF(cx + 0.5, top + 60))
 
 
-# ---------------------------------------------------------------- голова
-
-def face_shape(cx, cy, chimp):
-    path = QPainterPath()
-    if chimp:
-        path.addEllipse(QPointF(cx - 10.5, cy - 2), 13.5, 12.5)
-        path.addEllipse(QPointF(cx + 10.5, cy - 2), 13.5, 12.5)
-        path.addEllipse(QPointF(cx, cy + 13), 19, 14)
-    else:
-        path.addEllipse(QPointF(cx - 10, cy - 2), 12.5, 12.5)
-        path.addEllipse(QPointF(cx + 10, cy - 2), 12.5, 12.5)
-        path.addEllipse(QPointF(cx, cy + 12), 16, 12)
-    return path.simplified()
-
-
-def draw_head(p, pet, pose):
-    hx, hy = head_center(pose)
-    chimp = pet.get("chimp", False)
-    fur = C(pet["fur"])
-    fur_light = C(pet["fur_light"])
-    skin = C(pet["skin"])
-    turn = pose["turn"]
-    fx = turn * 7.0  # лицо сдвигается в сторону поворота
+def draw_sweater(p, pet, path, cx, top):
+    """Вязаный свитер с высоким воротом и ёлочкой."""
+    knit = C(pet["jacket"])
+    fill(p, knit, knit.darker(140), 1.0)
+    p.drawPath(path)
     p.save()
-    p.translate(hx, hy + 26)
-    p.rotate(pose["tilt"])
-    p.translate(-hx, -(hy + 26))
-
-    # пучок на макушке (под бантом)
-    if pet.get("headwear") == "bow":
-        fill(p, fur.darker(115))
-        ellipse(p, hx - fx * 0.3, hy - 36, 14, 12)
-        p.setPen(pen(fur_light, 0.8))
-        for a in (-0.8, -0.3, 0.2, 0.7):
-            p.drawArc(QRectF(hx - fx * 0.3 - 10, hy - 46, 20, 20), int(math.degrees(a) * 16 + 900),
-                      400)
-
-    # уши
-    ear_r = 11.5 if chimp else 8.5
-    ear_y = hy + (4 if chimp else 1)
-    for side in (-1, 1):
-        ex = hx + side * (29 if chimp else 29.5) - fx * 0.35
-        fill(p, fur)
-        ellipse(p, ex, ear_y, ear_r)
-        fill(p, skin.darker(108))
-        ellipse(p, ex + side * 0.5, ear_y, ear_r * 0.62)
-
-    # голова с пушистым краем
-    grad = QRadialGradient(QPointF(hx - 8, hy - 12), 40)
-    grad.setColorAt(0, fur_light)
-    grad.setColorAt(1, fur)
-    fill(p, grad)
-    if not chimp:
-        for i in range(18):
-            a = i / 18.0 * 2 * math.pi
-            ellipse(p, hx + 27 * math.cos(a), hy + 27 * math.sin(a), 5.2)
-    ellipse(p, hx, hy, 29.5 if not chimp else 30.5)
-    if chimp:
-        # волосы на макушке
-        p.setPen(pen(fur.lighter(130), 1.0))
-        for dx in (-6, -2, 2, 6):
-            p.drawLine(QPointF(hx + dx, hy - 27), QPointF(hx + dx * 1.3 + 1, hy - 33))
-
-    # лицо
-    face = face_shape(hx + fx, hy, chimp)
-    fill(p, skin, skin.darker(118), 0.8)
-    p.drawPath(face)
-    if pose["glow"] > 0.01:  # свет от телефона
-        g = QRadialGradient(QPointF(hx + fx, hy + 12), 22)
-        g.setColorAt(0, C("#CFE8FF", 110 * pose["glow"]))
-        g.setColorAt(1, C("#CFE8FF", 0))
-        fill(p, g)
-        p.drawPath(face)
-    if pet.get("blush"):
-        fill(p, C("#F08A9A", 120 * pet["blush"]))
-        for side in (-1, 1):
-            ellipse(p, hx + fx + side * 15, hy + 9, 4.2, 2.6)
-    draw_eyes(p, pet, pose, hx + fx, hy)
-    draw_mouth(p, pet, pose, hx + fx, hy)
-    draw_headwear(p, pet, pose, hx, hy, fx)
+    p.setClipPath(path)
+    p.setPen(pen(C(knit.lighter(135), 90), 1.0))
+    for x in range(int(cx) - 26, int(cx) + 27, 4):
+        for y in range(int(top) + 4, int(top) + 70, 5):
+            p.drawLine(QPointF(x, y), QPointF(x + 1.5, y + 2.5))
+            p.drawLine(QPointF(x + 3, y), QPointF(x + 1.5, y + 2.5))
     p.restore()
+    fill(p, "#9FBCA4")
+    tx, ty = cx + 11, top + 24
+    p.drawPolygon(poly([(tx, ty - 7), (tx - 4, ty), (tx + 4, ty)]))
+    p.drawPolygon(poly([(tx, ty - 4), (tx - 5, ty + 4), (tx + 5, ty + 4)]))
+    p.drawRect(QRectF(tx - 0.8, ty + 4, 1.6, 2))
+    # высокий ворот
+    collar = knit.darker(112)
+    fill(p, collar, knit.darker(150), 1.0)
+    p.drawRoundedRect(QRectF(cx - 16, top - 9, 32, 14), 6, 6)
+    p.setPen(pen(C(knit.lighter(140), 120), 0.9))
+    for x in range(-13, 14, 3):
+        p.drawLine(QPointF(cx + x, top - 7), QPointF(cx + x, top + 3))
 
 
-def draw_eyes(p, pet, pose, cx, cy):
-    chimp = pet.get("chimp", False)
-    openness = max(0.0, pose["eyes"])
-    gap = 10.5 if chimp else 9.8
-    rx, ry = (5.0, 5.2) if chimp else (5.6, 6.5)
-    if openness > 1.0:
-        ry *= 1.0 + 0.2 * (openness - 1.0)
-    look_x = pose["lookx"] * 2.3 + pose["turn"] * 0.8
-    look_y = pose["looky"] * 2.0
-    eyes = openness
-    for side in (-1, 1):
-        openness = eyes * (1.0 - pose["wink"]) if side > 0 else eyes
-        ex, ey = cx + side * gap, cy - 2
-        if openness < 0.12:
-            # закрытый глаз — дуга
-            p.setPen(pen(INK, 1.4))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            path = QPainterPath(QPointF(ex - rx + 1, ey))
-            path.quadTo(QPointF(ex, ey + 3.5), QPointF(ex + rx - 1, ey))
-            p.drawPath(path)
-        else:
-            fill(p, "#FFFFFF", INK, 0.9)
-            ellipse(p, ex, ey, rx, ry)
-            p.save()
-            clip = QPainterPath()
-            clip.addEllipse(QPointF(ex, ey), rx, ry)
-            p.setClipPath(clip)
-            ix, iy = ex + look_x, ey + look_y + 0.5
-            fill(p, "#4A2C18" if not chimp else "#3A2414")
-            ellipse(p, ix, iy, 3.9 if not chimp else 4.2)
-            fill(p, "#120C08")
-            ellipse(p, ix, iy, 2.2)
-            fill(p, "#FFFFFF")
-            ellipse(p, ix - 1.4, iy - 1.6, 1.3)
-            if openness < 1.0:
-                lid = ey - ry + 2 * ry * (1.0 - openness)
-                fill(p, C(pet["skin"]).darker(106))
-                p.drawRect(QRectF(ex - rx - 1, ey - ry - 1, 2 * rx + 2, lid - (ey - ry) + 1))
-                p.setPen(pen(INK, 1.0))
-                p.drawLine(QPointF(ex - rx, lid), QPointF(ex + rx, lid))
-            p.restore()
-        if pet.get("lashes"):
-            p.setPen(pen(INK, 1.0))
-            top = ey - ry * min(1.0, openness) if openness >= 0.12 else ey
-            ox = ex + side * (rx - 1.0)
-            p.drawLine(QPointF(ox, top + 2.0), QPointF(ox + side * 2.6, top - 0.2))
-            p.drawLine(QPointF(ox - side * 1.8, top + 0.6), QPointF(ox - side * 0.6 + side * 1.4, top - 1.6))
-        # брови
-        brow = pose["brow"]
-        base = ey - ry - 3.2 - brow * 2.2
-        inner_drop = max(0.0, -brow) * 2.4
-        outer = (ex + side * 5.2, base + 0.6)
-        inner = (ex - side * 4.2, base + inner_drop)
-        p.setPen(pen(C(pet["fur"]).darker(120), 1.8 if chimp else 1.5))
-        p.drawLine(QPointF(*inner), QPointF(*outer))
-
-
-def draw_mouth(p, pet, pose, cx, cy):
-    chimp = pet.get("chimp", False)
-    # нос
-    fill(p, INK)
-    spread = 3.4 if chimp else 2.6
-    ny = cy + (9 if chimp else 8)
-    for side in (-1, 1):
-        ellipse(p, cx + side * spread, ny, 1.4 if chimp else 1.2, 1.0)
-    mx, my = cx, cy + (17.5 if chimp else 15.5)
-    width = 8.0 if chimp else 6.5
-    opened = pose["mouth"]
-    if opened > 0.06:
-        h = 1.5 + 8.0 * opened
-        w = width * (0.75 + 0.3 * opened)
-        fill(p, "#5A1E1E", INK, 1.0)
-        p.drawEllipse(QRectF(mx - w, my - 1.5 - pose["smile"] * 0.8, 2 * w, h + 1.5))
-        if opened > 0.3:
-            fill(p, "#E07A86")
-            ellipse(p, mx, my + h - 2.2, w * 0.6, min(2.6, h * 0.3))
-    else:
-        s = pose["smile"]
-        p.setPen(pen(INK, 1.3))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        path = QPainterPath(QPointF(mx - width, my - s * 1.5))
-        path.quadTo(QPointF(mx, my + s * 5.0), QPointF(mx + width, my - s * 1.5))
-        p.drawPath(path)
-    if pose["tongue"] > 0.05:
-        fill(p, "#E8798A", "#B4505E", 0.8)
-        tl = 3.8 * pose["tongue"]
-        p.drawEllipse(QRectF(mx + 0.5, my - 0.5, 4.6, tl + 1.0))
-
-
-def draw_headwear(p, pet, pose, hx, hy, fx):
-    kind = pet.get("headwear")
-    phones = pet.get("headphones")
-    if kind == "bow":
-        bx, by = hx - fx * 0.3, hy - 47
-        fill(p, "#18181B", "#000000", 0.6)
-        p.drawPolygon(poly([(bx, by), (bx - 13, by - 7), (bx - 12, by + 6)]))
-        p.drawPolygon(poly([(bx, by), (bx + 13, by - 7), (bx + 12, by + 6)]))
-        p.drawPolygon(poly([(bx - 1, by + 1), (bx - 6, by + 11), (bx - 2, by + 10)]))
-        p.drawPolygon(poly([(bx + 1, by + 1), (bx + 6, by + 11), (bx + 2, by + 10)]))
-        fill(p, "#2C2C31")
-        ellipse(p, bx, by, 3.2, 3.0)
-    if kind == "cap":
-        cap = C(pet["cap"])
-        dome = QPainterPath(QPointF(hx - 29.5, hy - 9))
-        dome.cubicTo(QPointF(hx - 30, hy - 44), QPointF(hx + 30, hy - 44), QPointF(hx + 29.5, hy - 9))
-        dome.quadTo(QPointF(hx, hy - 15), QPointF(hx - 29.5, hy - 9))
-        g = QLinearGradient(hx - 30, 0, hx + 30, 0)
-        g.setColorAt(0, cap.lighter(108))
-        g.setColorAt(1, cap.darker(112))
-        fill(p, g, cap.darker(135), 1.0)
-        p.drawPath(dome)
-        p.setPen(pen(cap.darker(125), 0.8))
-        p.drawLine(QPointF(hx + fx * 0.5, hy - 36), QPointF(hx + fx * 0.7, hy - 14))
-        fill(p, cap.darker(108), cap.darker(140), 1.0)
-        p.drawEllipse(QRectF(hx + fx * 0.9 - 21, hy - 18, 42, 10))
-        fill(p, cap.darker(110))
-        ellipse(p, hx + fx * 0.5, hy - 37, 2.2, 1.6)
-        # бант сбоку кепки
-        bx, by = hx + 22 - fx * 0.2, hy - 27
-        fill(p, cap.lighter(105), cap.darker(140), 0.8)
-        p.drawPolygon(poly([(bx, by), (bx - 6, by - 9), (bx - 9, by + 2)]))
-        p.drawPolygon(poly([(bx, by), (bx + 9, by - 6), (bx + 7, by + 6)]))
-        ellipse(p, bx, by, 2.6)
-    if phones:
-        c = C(phones)
-        if kind != "cap":
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(pen(c.darker(130), 4.2))
-            p.drawArc(QRectF(hx - 32, hy - 36, 64, 66), 10 * 16, 160 * 16)
-            p.setPen(pen(c, 3.0))
-            p.drawArc(QRectF(hx - 32, hy - 36, 64, 66), 10 * 16, 160 * 16)
-        for side in (-1, 1):
-            ex = hx + side * 30 - fx * 0.35
-            fill(p, c, c.darker(150), 1.0)
-            p.drawRoundedRect(QRectF(ex - 6.5, hy - 9, 13, 20), 6, 6)
-            fill(p, c.lighter(125) if c.lightness() < 128 else c.darker(115))
-            ellipse(p, ex, hy + 1, 3.6)
-            fill(p, pet["fur"])
-            ellipse(p, ex, hy + 1.2, 1.8)
+def draw_plush_body(p, pet, path, cx, top):
+    """Плюшевое тельце со светлым брюшком и значком, как у игрушки."""
+    fur = C(pet["fur"])
+    g = QLinearGradient(cx - 26, 0, cx + 26, 0)
+    g.setColorAt(0, fur.darker(108))
+    g.setColorAt(0.4, C(pet["fur_light"]))
+    g.setColorAt(1, fur.darker(112))
+    fill(p, g, fur.darker(135), 1.0)
+    p.drawPath(path)
+    fill(p, "#F1DDB2")
+    ellipse(p, cx - 1, top + 40, 15, 22)
+    # пушок гривы на груди
+    fill(p, pet["mane_light"])
+    for dx in (-8, -3, 2, 7):
+        ellipse(p, cx + dx, top + 2, 5, 4)
+    # значок
+    fill(p, "#5B5560", "#3A353D", 0.8)
+    ellipse(p, cx + 12, top + 27, 6)
+    fill(p, "#D99AB0")
+    ellipse(p, cx + 12, top + 27, 4.3)
+    p.setPen(pen("#3A353D", 0.7))
+    p.drawLine(QPointF(cx + 9.5, top + 26), QPointF(cx + 14.5, top + 28))
 
 
 # ---------------------------------------------------------------- тигрёнок
@@ -652,16 +506,23 @@ def draw_desk(p):
 
 def draw_desk_items(p, pet, pose, ctx):
     t = ctx["t"]
-    draw_plant(p, t)
+    if pet.get("plant") == "cactus":
+        draw_cactus(p)
+    else:
+        draw_plant(p, t)
     extra = pet.get("desk_extra")
     if extra == "folders":
         draw_folders(p)
     elif extra == "books":
         draw_books(p)
+    elif extra == "papers":
+        draw_paper_stack(p)
     elif extra == "penguin":
         draw_paper_stack(p)
         draw_penguin(p, 40, 195)
     draw_monitor(p, ctx)
+    if pet.get("webcam"):
+        draw_webcam(p, t)
     draw_keyboard(p, ctx)
     draw_mouse(p, pose)
     draw_sticky(p)
@@ -671,6 +532,13 @@ def draw_desk_items(p, pet, pose, ctx):
     draw_phone(p, pet, pose)
     draw_mug(p, pet, pose, t)
     draw_plane(p, pose)
+    if pose["glassoff"] > 0.5 and pet.get("glasses"):
+        mx, my = (pose["hlx"] + pose["hrx"]) / 2, (pose["hly"] + pose["hry"]) / 2 - 3
+        draw_glasses(p, [(mx - 8.5, my), (mx + 8.5, my)], mx, scale=0.62)
+    if pose["pbvis"] > 0.02:
+        draw_paper_ball(p, pose)
+    if pose["dumb"] > 0.5:
+        draw_dumbbell(p, pose)
 
 
 def draw_plant(p, t):
@@ -687,6 +555,40 @@ def draw_plant(p, t):
     p.drawPolygon(poly([(7, 150), (29, 150), (26, 172), (10, 172)]))
     fill(p, "#D47B4E")
     p.drawRect(QRectF(6, 148, 24, 4))
+
+
+def draw_cactus(p):
+    """Кактус в зелёном горшке с ёлочками."""
+    fill(p, "#6E9A4A", "#4A6E30", 0.8)
+    p.drawRoundedRect(QRectF(12, 128, 12, 26), 6, 6)
+    p.drawRoundedRect(QRectF(5, 136, 7, 11), 3.5, 3.5)
+    p.drawRoundedRect(QRectF(7, 142, 7, 5), 2, 2)
+    p.drawRoundedRect(QRectF(24, 132, 6, 10), 3, 3)
+    p.drawRoundedRect(QRectF(22, 139, 6, 5), 2, 2)
+    p.setPen(pen("#F3EBC8", 0.6))
+    for x, y in ((14, 133), (18, 131), (21, 136), (15, 141), (20, 145), (8, 139), (27, 135),
+                 (17, 149), (13, 146)):
+        p.drawLine(QPointF(x, y), QPointF(x - 1.2, y - 1.2))
+        p.drawLine(QPointF(x, y), QPointF(x + 1.2, y - 1.2))
+    fill(p, "#E98AA6")
+    ellipse(p, 18, 128, 2.2)
+    fill(p, "#3D5E44", "#2A4230", 0.8)
+    p.drawPolygon(poly([(7, 152), (29, 152), (27, 172), (9, 172)]))
+    fill(p, "#BFD3C2")
+    for x in (13, 18, 23):
+        p.drawPolygon(poly([(x, 157), (x - 2.5, 163), (x + 2.5, 163)]))
+
+
+def draw_webcam(p, t):
+    """Веб-камера на мониторе (как у Дениса дома)."""
+    fill(p, "#1E1F24", "#0C0C10", 0.6)
+    p.drawRoundedRect(QRectF(242, 55, 22, 8), 3.5, 3.5)
+    fill(p, "#3A4A66")
+    ellipse(p, 253, 59, 2.6)
+    fill(p, "#0C0C10")
+    ellipse(p, 253, 59, 1.3)
+    fill(p, "#4FC3F7" if int(t * 1.2) % 4 else "#1B6E95")
+    ellipse(p, 260.5, 59, 0.9)
 
 
 def draw_folders(p):
@@ -864,6 +766,104 @@ def draw_toy(p, pose, t):
     p.restore()
 
 
+def draw_paper_ball(p, pose):
+    p.save()
+    p.setOpacity(min(1.0, pose["pbvis"]))
+    x, y = pose["pbx"], pose["pby"]
+    fill(p, "#F4F2EA", "#B8B2A2", 0.7)
+    p.drawPolygon(poly([(x - 4.5, y - 1), (x - 2, y - 4.5), (x + 2.5, y - 4), (x + 4.8, y - 0.5),
+                        (x + 3, y + 4), (x - 1.5, y + 4.6), (x - 4.6, y + 2)]))
+    p.setPen(pen("#B8B2A2", 0.6))
+    p.drawLine(QPointF(x - 2, y - 2), QPointF(x + 1, y + 1))
+    p.drawLine(QPointF(x + 1, y - 3), QPointF(x - 0.5, y + 2.5))
+    p.restore()
+
+
+def draw_dumbbell(p, pose):
+    x, y = pose["hrx"], pose["hry"]
+    fill(p, "#5A5F68", "#2E3138", 0.8)
+    p.drawRect(QRectF(x - 9, y - 0.9, 18, 1.8))
+    for dx in (-9, 6):
+        p.drawRoundedRect(QRectF(x + dx, y - 5, 3.4, 10), 1, 1)
+        p.drawRoundedRect(QRectF(x + dx + (-1.6 if dx < 0 else 1.6), y - 3.8, 3.4, 7.6), 1, 1)
+
+
+def draw_spinning_pen(p, pose, t):
+    """Ручка крутится вокруг пальцев."""
+    x, y = pose["hrx"], pose["hry"] - 2
+    a = t * 9.0
+    dx, dy = 7.0 * math.cos(a), 7.0 * math.sin(a) * 0.55
+    p.save()
+    p.setOpacity(pose["spin"])
+    p.setPen(pen("#2E4A86", 2.0))
+    p.drawLine(QPointF(x - dx, y - dy), QPointF(x + dx, y + dy))
+    p.setPen(pen("#D8D8D8", 1.2))
+    p.drawLine(QPointF(x + dx * 0.75, y + dy * 0.75), QPointF(x + dx, y + dy))
+    p.restore()
+
+
+def draw_pinecone(p, x, y, angle):
+    p.save()
+    p.translate(x, y)
+    p.rotate(angle)
+    fill(p, "#8A5A2E", "#5A3818", 0.6)
+    p.drawEllipse(QRectF(-3, -4.2, 6, 8.4))
+    p.setPen(pen("#5A3818", 0.5))
+    for k in (-2.2, 0.0, 2.2):
+        p.drawLine(QPointF(-2.6, k), QPointF(2.6, k + 1.2))
+    p.restore()
+
+
+def draw_juggling(p, pose, t):
+    """Три шишки летают по дуге из руки в руку."""
+    lx, ly = pose["hlx"], pose["hly"] - 4
+    rx, ry = pose["hrx"], pose["hry"] - 4
+    p.save()
+    p.setOpacity(pose["jug"])
+    for i in range(3):
+        phase = (t * 0.95 + i / 3.0) % 1.0
+        if phase < 0.5:
+            u = phase * 2
+            x, y = lx + (rx - lx) * u, ly + (ry - ly) * u - 38 * math.sin(math.pi * u)
+        else:
+            u = (phase - 0.5) * 2
+            x, y = rx + (lx - rx) * u, ry + (ly - ry) * u - 10 * math.sin(math.pi * u)
+        draw_pinecone(p, x, y, t * 400 + i * 90)
+    p.restore()
+
+
+def draw_fly_and_tongue(p, pet, pose, t):
+    mx, my = mouth_point(pet, pose)
+    fx, fy = pose["flyx"], pose["flyy"]
+    k = pose["ftongue"]
+    if k > 0.01:
+        tx, ty = mx + (fx - mx) * k, my + (fy - my) * k
+        p.setPen(pen("#B4505E", 4.6))
+        p.drawLine(QPointF(mx, my), QPointF(tx, ty))
+        p.setPen(pen("#E8798A", 3.2))
+        p.drawLine(QPointF(mx, my), QPointF(tx, ty))
+        fill(p, "#E8798A", "#B4505E", 0.8)
+        ellipse(p, tx, ty, 3.4)
+    if pose["fly"] > 0.01:
+        p.save()
+        p.setOpacity(pose["fly"])
+        wing = 2.2 + 1.2 * math.sin(t * 60.0)
+        fill(p, C("#DCEBFF", 190), C("#8AA0B8", 190), 0.5)
+        ellipse(p, fx - 1.6, fy - 2.2, wing * 0.7, wing)
+        ellipse(p, fx + 1.6, fy - 2.2, wing * 0.7, wing)
+        fill(p, "#1E1E24")
+        ellipse(p, fx, fy, 2.2, 1.8)
+        fill(p, "#B33A3A")
+        ellipse(p, fx + 1.6, fy - 0.4, 0.9)
+        p.setPen(pen(C("#6A6A70", 120), 0.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for k2 in range(3):  # жужжит
+            a = t * 3 + k2 * 2.1
+            p.drawArc(QRectF(fx - 6 - k2 * 2, fy - 6 - k2 * 2, 12 + k2 * 4, 12 + k2 * 4),
+                      int(math.degrees(a) * 16), 40 * 16)
+        p.restore()
+
+
 def draw_penguin(p, x, y):
     fill(p, "#F2A23A")
     ellipse(p, x - 3, y + 0.5, 3, 1.4)
@@ -955,6 +955,25 @@ def draw_mug(p, pet, pose, t):
         p.setFont(font)
         p.setPen(pen("#5A9E3A"))
         p.drawText(QRectF(-7, -4, 14, 7), Qt.AlignmentFlag.AlignCenter, "QGIS")
+    elif kind == "pig":
+        # кружка-свинка: ушки, глазки, пятачок
+        pink = color.darker(112)
+        fill(p, pink, pink.darker(130), 0.6)
+        p.drawPolygon(poly([(-6.5, -9), (-3, -9), (-5.5, -13.5)]))
+        p.drawPolygon(poly([(6.5, -9), (3, -9), (5.5, -13.5)]))
+        fill(p, "#3A2A2A")
+        ellipse(p, -3, -3, 0.9)
+        ellipse(p, 3, -3, 0.9)
+        fill(p, pink, pink.darker(130), 0.6)
+        ellipse(p, 0, 2, 4.2, 3.0)
+        fill(p, pink.darker(150))
+        ellipse(p, -1.4, 2, 0.8, 1.1)
+        ellipse(p, 1.4, 2, 0.8, 1.1)
+    elif kind == "paw":
+        fill(p, "#7A4A20")
+        ellipse(p, 0, 2, 3.2, 2.6)
+        for dx, dy in ((-3.4, -2), (-1.2, -3.8), (1.2, -3.8), (3.4, -2)):
+            ellipse(p, dx, dy, 1.2)
     p.restore()
 
 
@@ -1227,23 +1246,26 @@ def draw_arm(p, pet, pose, left):
     path = QPainterPath(QPointF(*s))
     path.quadTo(QPointF(*c), QPointF(*h))
     fur = C(pet["fur"])
+    clothes = pet["clothes"]
     p.setBrush(Qt.BrushStyle.NoBrush)
-    if pet["clothes"] == "suit":
-        jacket = C(pet["jacket"])
-        p.setPen(pen(jacket.darker(150), 12.5))
+    if clothes in ("suit", "sweater"):
+        sleeve = C(pet["jacket"])
+        p.setPen(pen(sleeve.darker(150), 12.5 if clothes == "suit" else 13.5))
         p.drawPath(path)
-        p.setPen(pen(jacket, 10.5))
+        p.setPen(pen(sleeve, 10.5 if clothes == "suit" else 11.5))
         p.drawPath(path)
-        # манжета
-        a, b = quad_point(s, c, h, 0.84), quad_point(s, c, h, 0.92)
-        p.setPen(pen("#F2F2EE", 8.0, Qt.PenCapStyle.FlatCap))
+        # манжета рубашки или вязаная резинка
+        a, b = quad_point(s, c, h, 0.84), quad_point(s, c, h, 0.93)
+        cuff = "#F2F2EE" if clothes == "suit" else sleeve.darker(118)
+        p.setPen(pen(cuff, 8.0 if clothes == "suit" else 11.0, Qt.PenCapStyle.FlatCap))
         p.drawLine(QPointF(*a), QPointF(*b))
     else:
-        width = 10.0 if pet.get("chimp") else 8.5
+        width = {"chimp": 10.0, "lion": 10.5}.get(pet.get("kind"), 8.5)
         p.setPen(pen(fur.darker(150), width + 2))
         p.drawPath(path)
         p.setPen(pen(fur, width))
         p.drawPath(path)
+    if clothes == "shirt":
         # короткий рукав рубашки — начало той же дуги
         k = 0.3
         sleeve = QPainterPath(QPointF(*s))
@@ -1282,8 +1304,22 @@ def draw_hand(p, pet, pose, at, angle, left):
     p.translate(x, y)
     p.rotate(angle)
     fill(p, hand, outline, 0.8)
-    p.drawEllipse(QRectF(-4.5, -4.8, 10, 9.6))
-    ellipse(p, 1.0, -side * 4.4, 2.4, 2.0)  # большой палец
+    kind = pet.get("kind")
+    if kind == "frog":
+        # лягушачья лапка: пальцы с круглыми подушечками
+        p.drawEllipse(QRectF(-4.5, -4.2, 9, 8.4))
+        for fy in (-3.6, 0.0, 3.6):
+            ellipse(p, 5.0, fy, 2.0)
+        ellipse(p, 0.5, -side * 4.6, 1.9)
+    elif kind == "lion":
+        # плюшевая лапа с «бобами»
+        p.drawEllipse(QRectF(-5.5, -5.5, 11, 11))
+        fill(p, "#C98E54")
+        for fy in (-2.8, 0.0, 2.8):
+            ellipse(p, 3.6, fy, 1.2)
+    else:
+        p.drawEllipse(QRectF(-4.5, -4.8, 10, 9.6))
+        ellipse(p, 1.0, -side * 4.4, 2.4, 2.0)  # большой палец
     p.restore()
     if not left and pose["pen"] > 0.5:
         p.setPen(pen("#2E4A86", 1.8))
@@ -1396,6 +1432,12 @@ def draw_overlays(p, pet, pose, t):
         for i in range(3):
             if (t * 3) % 3 >= i:
                 ellipse(p, bx - 5 + i * 5, by - 0.5, 1.4)
+    for key, text, color, dx in (("achoo", "Апчхи!", "#4C8FD0", 24), ("roar", "Р-р-р!", "#C9542A", 26)):
+        if pose[key] > 0.01:
+            font.setPixelSize(13)
+            p.setFont(font)
+            p.setPen(pen(C(color, 255 * pose[key]), 1.0))
+            p.drawText(QPointF(hx + dx, hy - 22 + 2 * math.sin(t * 20)), text)
     if pose["flash"] > 0.01:
         # вспышка селфи
         p.fillRect(QRectF(-2000, -2000, 4000, 4000), C("#FFFFFF", 200 * min(1.0, pose["flash"])))

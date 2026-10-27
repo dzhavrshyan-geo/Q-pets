@@ -52,6 +52,14 @@ BASE = {
     "hearts": 0.0, "excl": 0.0, "dots": 0.0, "check": 0.0, "boardcheck": 0.0, "flash": 0.0,
     # Тигрёнок: довольный (глаза-дуги) и ловит лапами
     "tiger": 0.0, "tpaw": 0.0,
+    # Лягушонок: очки сняты (в руках), муха и язык; лев: распушённая и взъерошенная грива
+    "glassoff": 0.0, "fly": 0.0, "flyx": 236.0, "flyy": 52.0, "ftongue": 0.0,
+    "puff": 0.0, "ruffle": 0.0,
+    # Вещи для общих занятий: мячики для жонглирования, бумажный комок, гантель,
+    # ручка, которую крутят в пальцах
+    "jug": 0.0, "pbx": 150.0, "pby": 140.0, "pbvis": 0.0, "dumb": 0.0, "spin": 0.0,
+    # Надписи: «Апчхи!», «Р-р-р!»
+    "achoo": 0.0, "roar": 0.0,
 }
 
 KEYS_L = (BASE["hlx"], BASE["hly"])
@@ -704,6 +712,373 @@ oops = keyframes(
 )
 
 
+# ------------------------------------------------- ещё занятия для всех
+
+_call_frames = keyframes(
+    (0.0, {}),
+    (0.9, {"hlx": 104, "hly": 189, "lookx": -0.4, "looky": 0.8, "turn": -0.1}),
+    (1.4, {"phx": 112, "phy": 166, "phup": 0.6, "hlx": 113, "hly": 172}),
+    (2.0, {"phx": 124, "phy": 84, "phup": 1.0, "phrot": -14, "hlx": 126, "hly": 93,
+           "tilt": -6, "turn": -0.2, "lookx": 0.4, "looky": 0.1, **elbows(left=(110, 132))}),
+    (8.6, {}),
+    (9.2, {"phx": 112, "phy": 170, "phup": 0.5, "phrot": 0, "hlx": 113, "hly": 177, "lew": 0.0,
+           "tilt": 0, "rew": 0.0, "hrx": KEYS_R[0], "hry": KEYS_R[1]}),
+    (9.8, {"phx": PHONE_DESK[0], "phy": PHONE_DESK[1], "phup": 0.0, "hlx": 105, "hly": 189}),
+    (10.6, {**HANDS_ON_KEYS, **LOOK_SCREEN, **NEUTRAL_FACE}),
+)
+
+
+def call(t, pet):
+    """Говорит по телефону и жестикулирует свободной рукой."""
+    p = _call_frames(t)
+    k = pulse(t, 2.0, 8.6, 0.4)
+    talk = max(0.0, math.sin(t * 9.0)) * (0.5 + 0.5 * math.sin(t * 0.9) > 0.15)
+    p["mouth"] = 0.28 * talk * k
+    p["hrx"] += (174 + 9 * math.sin(t * 1.7) - p["hrx"]) * k
+    p["hry"] += (150 + 10 * math.sin(t * 2.3) - p["hry"]) * k
+    p["rew"] = max(p["rew"], k)
+    p["rex"], p["rey"] = 190, 166
+    p["brow"] = 0.5 * max(0.0, math.sin(t * 0.7)) * k
+    p["smile"] = 0.25 + 0.4 * math.sin(t * 0.5) * k
+    return p
+
+
+def juggle(t, pet):
+    """Жонглирует шишками."""
+    k = pulse(t, 0.0, 7.2, 0.8)
+    p = pose()
+    p.update(
+        hlx=137 + (134 - 137) * k, hly=181 + (150 - 181) * k - 5.0 * max(0.0, math.sin(t * 6.3)) * k,
+        hrx=163 + (166 - 163) * k, hry=181 + (150 - 181) * k
+        - 5.0 * max(0.0, math.sin(t * 6.3 + math.pi)) * k,
+        turn=0.35 * (1 - k), lookx=0.7 * (1 - k) + 0.5 * math.sin(t * 3.15) * k,
+        looky=0.15 + (-0.7 - 0.15) * k, smile=0.25 + 0.5 * k, tongue=0.6 * k,
+        jug=pulse(t, 0.9, 6.9, 0.3), lew=k, lex=116, ley=160, rew=k, rex=184, rey=160,
+    )
+    p["smile"] += 0.3 * pulse(t, 6.9, 8.0, 0.3)
+    return p
+
+
+_paper_ball_frames = keyframes(
+    (0.0, {}),
+    (0.6, {"hlx": 145, "hly": 148, "hrx": 156, "hry": 148, "turn": 0.0, "lookx": 0.0,
+           "looky": 0.9, "brow": -0.4, **elbows(left=(120, 166), right=(180, 166))}),
+    (0.8, {"pbvis": 1.0, "pbx": 150.5, "pby": 146}),
+    (1.8, {}),
+    (2.4, {"hrx": 186, "hry": 112, "pbx": 186, "pby": 107, "hlx": KEYS_L[0], "hly": KEYS_L[1],
+           "lew": 0.0, "lookx": 1.0, "looky": 0.4, "turn": 0.5, "tongue": 0.8, "brow": -0.5,
+           **elbows(right=(196, 148))}),
+    (2.9, {"hrx": 180, "hry": 118, "pbx": 180, "pby": 113}),
+    (3.1, {"hrx": 198, "hry": 108, "tongue": 0.0}),
+)
+
+
+def paper_ball(t, pet):
+    """Комкает бумажку и бросает её в корзину — попал!"""
+    p = _paper_ball_frames(t)
+    if t > 2.9:
+        u = clamp((t - 2.9) / 1.0)
+        p["pbx"] = 180 + 170 * u
+        p["pby"] = 113 - 40 * math.sin(math.pi * u * 0.8) + 120 * u * u
+        p["pbvis"] = 1.0 - smooth((u - 0.9) / 0.1)
+        p["lookx"] = clamp((p["pbx"] - 150) / 60.0, -1.0, 1.0)
+        p["looky"] = clamp((p["pby"] - 90) / 40.0, -1.0, 1.0)
+    win = pulse(t, 4.0, 5.2, 0.25)
+    p["hrx"] += (188 - p["hrx"]) * win
+    p["hry"] += (92 - 4 * math.sin(t * 14) - p["hry"]) * win
+    p["smile"] += (1.0 - p["smile"]) * win
+    p["mouth"] = max(p["mouth"], 0.3 * win)
+    back = smooth((t - 5.4) / 0.8)
+    for key, value in HANDS_ON_KEYS.items():
+        p[key] += (value - p[key]) * back
+    for key, value in LOOK_SCREEN.items():
+        p[key] += (value - p[key]) * back
+    p["smile"] += (0.25 - p["smile"]) * smooth((t - 6.2) / 0.8)
+    p["brow"] *= 1 - back
+    return p
+
+
+yawn = keyframes(
+    (0.0, {}),
+    (0.7, {"hlx": 147, "hly": 110, "eyes": 0.3, "turn": 0.0, "lookx": 0.0, **elbows(left=(124, 160))}),
+    (1.2, {"mouth": 1.0, "eyes": 0.0, "hdy": -1.5, "tilt": -4, "brow": 0.6}),
+    (2.6, {}),
+    (3.2, {"mouth": 0.0, "eyes": 0.6, "hdy": 0.0, "tilt": 3, "brow": 0.0}),
+    (3.6, {"tilt": -3}),
+    (4.0, {"tilt": 0, "eyes": 1.0, **HANDS_ON_KEYS, **LOOK_SCREEN}),
+    (4.6, {}),
+)
+
+_sneeze_frames = keyframes(
+    (0.0, {}),
+    (1.3, {"hdy": -3.0, "tilt": -7, "eyes": 0.0, "mouth": 0.45, "brow": 0.8, "turn": 0.0,
+           "lookx": 0.0, "bdy": -1.0, "hrx": 164, "hry": 118, **elbows(right=(180, 154))}),
+    (1.45, {"hdy": 4.0, "tilt": 7, "mouth": 0.6, "bdy": 1.5, "hrx": 158, "hry": 102}),
+    (2.4, {"mouth": 0.0, "hdy": 1.0, "tilt": 2, "bdy": 0.0, "eyes": 0.5, "brow": 0.3}),
+    (3.4, {}),
+    (4.0, {**HANDS_ON_KEYS, **LOOK_SCREEN, **NEUTRAL_FACE}),
+)
+
+
+def sneeze(t, pet):
+    """«А-а-апчхи!» — и вытирает нос."""
+    p = _sneeze_frames(t)
+    p["achoo"] = pulse(t, 1.4, 2.6, 0.15)
+    wipe = pulse(t, 2.4, 3.4, 0.2)
+    p["hrx"] += 3.5 * math.sin(t * 16.0) * wipe
+    return p
+
+
+_dumbbell_frames = keyframes(
+    (0.0, {}),
+    (0.8, {"hrx": 182, "hry": 196, "lookx": 0.6, "looky": 1.0, "turn": 0.4}),
+    (1.0, {"dumb": 1.0}),
+    (1.7, {"hrx": 176, "hry": 162, "lookx": 0.8, "looky": 0.4, "turn": 0.5, "brow": -0.7,
+           "smile": -0.2, **elbows(right=(190, 160))}),
+    (6.2, {}),
+    (6.8, {"hrx": 182, "hry": 196, "rew": 0.0, "smile": 0.8, "brow": 0.3}),
+    (7.0, {"dumb": 0.0}),
+    (7.8, {**HANDS_ON_KEYS, **LOOK_SCREEN, **NEUTRAL_FACE}),
+)
+
+
+def dumbbell(t, pet):
+    """Качает бицепс гантелей."""
+    p = _dumbbell_frames(t)
+    k = pulse(t, 1.7, 6.2, 0.2)
+    lift = max(0.0, math.sin((t - 1.7) * 2.6))
+    p["hry"] -= 34.0 * lift * k
+    p["hrx"] -= 5.0 * lift * k
+    p["mouth"] = 0.15 * lift * k
+    p["sweat"] = pulse(t, 4.6, 6.6, 0.3)
+    p["bdx"] = -1.0 * lift * k
+    return p
+
+
+def pen_spin(t, pet):
+    """Крутит ручку в пальцах, обдумывая задачу."""
+    k = pulse(t, 0.0, 5.4, 0.6)
+    p = pose(turn=0.45, lookx=0.8, looky=0.0 + 0.2 * math.sin(t * 0.8), brow=-0.2 + 0.3 * k)
+    p["hrx"] += (168 - p["hrx"]) * k
+    p["hry"] += (158 - p["hry"]) * k
+    p["rew"] = k
+    p["rex"], p["rey"] = 186, 162
+    p["spin"] = pulse(t, 0.5, 5.2, 0.2)
+    return p
+
+
+nod_off = keyframes(
+    (0.0, {}),
+    (2.6, {"eyes": 0.1, "hdy": 5.5, "tilt": 9, "lookx": 0.3, "looky": 0.6, "brow": 0.2,
+           "mouth": 0.12}),
+    (2.7, {"eyes": 1.35, "hdy": -2.0, "tilt": 0, "brow": 1.0, "excl": 1.0, "mouth": 0.3,
+           "bdy": -2.0, "lookx": 0.0, "looky": 0.0, "turn": 0.0}),
+    (3.4, {"tilt": -6, "excl": 0.0, "mouth": 0.0, "bdy": 0.0}),
+    (3.8, {"tilt": 6}),
+    (4.2, {"tilt": -3}),
+    (4.8, {**LOOK_SCREEN, **NEUTRAL_FACE}),
+    (5.4, {}),
+)
+
+
+# ------------------------------------------------- уходит из кадра и возвращается
+
+WALK_AWAY = 262.0  # насколько отходит вправо (за край кадра)
+STAND_UP = -22.0
+SHOULDER_Y_ANIM = 128.0  # высота плеч, как в drawing.py
+
+
+def _walk_hands(p, t, sway=1.0):
+    """Руки свисают вдоль тела и качаются при ходьбе."""
+    swing = 6.0 * math.sin(t * 9.0) * sway
+    sx = 150.0 + p["bdx"]
+    sy = SHOULDER_Y_ANIM + p["bdy"]
+    return {"hlx": sx - 21 + swing, "hly": sy + 46, "hrx": sx + 21 - swing, "hry": sy + 46,
+            "lew": 0.0, "rew": 0.0}
+
+
+def leave(t, pet):
+    """Встаёт, поворачивается и уходит вправо за край кадра."""
+    stand = smooth(t / 0.8)
+    walk = clamp((t - 1.1) / 2.3) ** 1.15
+    p = pose(bdy=STAND_UP * stand, bdx=WALK_AWAY * walk,
+             turn=0.35 + 0.65 * smooth((t - 0.8) / 0.3), lookx=1.0 * smooth((t - 0.8) / 0.3),
+             looky=0.0, smile=0.35)
+    p["hdy"] = -1.5 * abs(math.sin(t * 9.0)) * (walk > 0)
+    push = {"hlx": 130.0, "hly": 170.0 + STAND_UP * stand * 0.3,
+            "hrx": 170.0, "hry": 170.0 + STAND_UP * stand * 0.3}
+    hang = _walk_hands(p, t, sway=1.0 if walk > 0 else 0.0)
+    k = smooth((t - 0.7) / 0.5)
+    for key in ("hlx", "hly", "hrx", "hry"):
+        p[key] = push[key] + (hang[key] - push[key]) * k
+    return p
+
+
+def gone(t, pet):
+    p = pose(bdy=STAND_UP, bdx=WALK_AWAY, turn=1.0)
+    p.update(_walk_hands(p, 0.0, 0.0))
+    return p
+
+
+def come_back(t, pet):
+    """Возвращается из-за правого края кадра и садится за стол."""
+    walk = 1.0 - clamp(t / 2.3) ** 0.9
+    sit = smooth((t - 2.3) / 0.8)
+    p = pose(bdx=WALK_AWAY * walk, bdy=STAND_UP * (1.0 - sit),
+             turn=-1.0 + 1.35 * smooth((t - 2.2) / 0.5), lookx=-1.0 + 1.7 * smooth((t - 2.2) / 0.5),
+             looky=0.0 + 0.15 * sit, smile=0.4)
+    p["hdy"] = -1.5 * abs(math.sin(t * 9.0)) * (walk > 0.001)
+    hang = _walk_hands(p, t, sway=1.0 if walk > 0.001 else 0.0)
+    k = smooth((t - 2.4) / 0.9)
+    for key in ("hlx", "hly", "hrx", "hry"):
+        p[key] = hang[key] + (BASE[key] - hang[key]) * k
+    return p
+
+
+# ------------------------------------------------- когда заходит начальник
+
+def startle(t, pet):
+    """Начальник застал врасплох: подпрыгивает от испуга."""
+    jump = math.sin(math.pi * clamp(t / 0.5))
+    return pose(
+        bdy=-7.0 * jump, hdy=-2.0 * jump, eyes=1.4, brow=1.0, mouth=0.45, smile=-0.3,
+        turn=-0.6, lookx=-1.0, looky=-0.4, excl=pulse(t, 0.0, 0.9, 0.1), sweat=1.0,
+        hlx=130, hly=124, hrx=170, hry=124, **elbows(left=(112, 150), right=(188, 150)),
+    )
+
+
+def fake_typing(t, pet):
+    """Изо всех сил делает вид, что работал всё это время, и косится на начальника."""
+    p = typing(t * 1.5, pet)
+    glance = pulse(t % 3.0, 1.6, 2.3, 0.15)
+    p["turn"] += (-0.5 - p["turn"]) * glance
+    p["lookx"] += (-1.0 - p["lookx"]) * glance
+    p["looky"] += (-0.3 - p["looky"]) * glance
+    p["sweat"] = 1.0
+    p["smile"] = -0.25 + 0.6 * glance
+    p["brow"] = -0.2 + 0.7 * glance
+    return p
+
+
+def listen(t, pet):
+    """Слушает начальника и кивает."""
+    nod = max(0.0, math.sin(t * 2.3)) ** 4
+    return pose(turn=-0.75, lookx=-1.0, looky=-0.45, hdy=1.8 * nod, smile=0.35, brow=0.25)
+
+
+# ------------------------------------------------- любимые дела Семы и Дениса
+
+def fly(t, pet):
+    """Лягушонок следит за мухой… и ловит её языком."""
+    p = pose()
+    catch = 6.0
+    if t < catch:
+        u = t / catch
+        fx = 300 - 90 * u + 26 * math.sin(t * 2.3)
+        fy = 30 + 30 * u + 16 * math.sin(t * 3.7)
+    else:
+        fx = 210 - 4 * math.sin(catch * 2.3)
+        fy = 60 + 16 * math.sin(catch * 3.7)
+    tongue = blip(t, catch + 0.1, 0.18) if t < catch + 0.1 else max(0.0, 1.0 - (t - catch - 0.1) / 0.3)
+    if t >= catch + 0.1:
+        # муха на кончике языка едет в рот
+        mx, my = 150.0, 97.0
+        fx = mx + (fx - mx) * tongue
+        fy = my + (fy - my) * tongue
+    hx, hy = 150.0, 86.0
+    follow = 1.0 - smooth((t - 6.6) / 0.6)
+    p.update(
+        fly=1.0 if t < catch + 0.4 else 0.0, flyx=fx, flyy=fy,
+        ftongue=tongue if t > catch - 0.1 else 0.0,
+        lookx=clamp((fx - hx) / 50.0, -1, 1) * follow + 0.7 * (1 - follow),
+        looky=clamp((fy - hy) / 35.0, -1, 1) * follow + 0.15 * (1 - follow),
+        turn=clamp((fx - hx) / 90.0, -1, 1) * follow + 0.35 * (1 - follow),
+        brow=-0.6 * pulse(t, 4.6, catch, 0.3),
+        mouth=0.0, smile=0.25 + 0.75 * pulse(t, 6.6, 9.0, 0.3),
+        eyes=1.0 - 0.95 * pulse(t, 6.7, 8.2, 0.2),
+    )
+    # довольно гладит живот
+    belly = pulse(t, 7.0, 8.8, 0.4)
+    p["hrx"] += (152 - p["hrx"]) * belly
+    p["hry"] += (152 + 2 * math.sin(t * 7) - p["hry"]) * belly
+    p["rew"] = belly
+    p["rex"], p["rey"] = 180, 166
+    p["fly"] = p["fly"] * clamp((t - 0.2) / 0.4)
+    return p
+
+
+glasses = keyframes(
+    (0.0, {}),
+    (0.8, {"hlx": 133, "hly": 74, "hrx": 167, "hry": 74, "turn": 0.0, "lookx": 0.0, "looky": 0.0,
+           **elbows(left=(112, 124), right=(188, 124))}),
+    (1.0, {"glassoff": 1.0}),
+    (1.6, {"hlx": 144, "hly": 142, "hrx": 156, "hry": 142, "eyes": 0.55, "brow": -0.4,
+           "looky": 0.8, **elbows(left=(118, 166), right=(182, 166))}),
+    (2.0, {"mouth": 0.35}),
+    (2.4, {"mouth": 0.0}),
+    (5.0, {}),
+    (5.6, {"hlx": 145, "hly": 112, "hrx": 155, "hry": 112, "looky": 0.4, "eyes": 0.6,
+           **elbows(left=(122, 160), right=(178, 160))}),
+    (6.4, {"hlx": 133, "hly": 74, "hrx": 167, "hry": 74, "looky": 0.0,
+           **elbows(left=(112, 124), right=(188, 124))}),
+    (6.6, {"glassoff": 0.0, "eyes": 1.0, "brow": 0.2}),
+    (7.4, {"hlx": KEYS_L[0], "hly": KEYS_L[1], "lew": 0.0, "hrx": 150, "hry": 72,
+           **elbows(right=(176, 120))}),
+    (8.0, {"smile": 0.8}),
+    (8.8, {**HANDS_ON_KEYS, **LOOK_SCREEN, **NEUTRAL_FACE}),
+)
+
+
+def clean_glasses(t, pet):
+    """Снимает очки, дышит на них, протирает и надевает обратно."""
+    p = glasses(t)
+    wipe = pulse(t, 2.4, 5.0, 0.2)
+    p["hlx"] += 4.0 * math.sin(t * 10.0) * wipe
+    p["hrx"] -= 3.0 * math.sin(t * 10.0) * wipe
+    return p
+
+
+def mane(t, pet):
+    """Ерошит и распушает гриву, потом встряхивает головой."""
+    k = pulse(t, 0.0, 5.0, 0.8)
+    p = pose(turn=0.0, lookx=0.0, looky=-0.2, eyes=1.0 - 0.95 * k, smile=0.25 + 0.6 * k)
+    p["hlx"] += (121 - p["hlx"]) * k
+    p["hly"] += (82 + 4 * math.sin(t * 13) - p["hly"]) * k
+    p["hrx"] += (179 - p["hrx"]) * k
+    p["hry"] += (82 - 4 * math.sin(t * 13) - p["hry"]) * k
+    p.update(lew=k, lex=104, ley=124, rew=k, rex=196, rey=124)
+    p["ruffle"] = pulse(t, 0.6, 5.0, 0.4)
+    shake = pulse(t, 5.0, 6.4, 0.2)
+    p["tilt"] = 9.0 * math.sin(t * 16.0) * shake
+    p["puff"] = pulse(t, 4.6, 7.0, 0.5)
+    p["smile"] += 0.5 * pulse(t, 6.2, 7.6, 0.3)
+    return p
+
+
+roar = keyframes(
+    (0.0, {}),
+    (0.8, {"bdy": -2.0, "hdy": -2.0, "eyes": 1.2, "brow": -0.5, "turn": 0.0, "lookx": 0.0,
+           "looky": 0.0}),
+    (1.3, {"mouth": 1.0, "puff": 1.0, "roar": 1.0, "eyes": 0.35, "brow": -1.0, "bdy": -3.0,
+           "hlx": 121, "hly": 98, "hrx": 179, "hry": 98, **elbows(left=(106, 136), right=(194, 136))}),
+    (2.6, {}),
+    (3.0, {"mouth": 0.0, "puff": 0.25, "roar": 0.0, "eyes": 0.6, "brow": 0.6, "bdy": 0.0,
+           "hdy": 0.0, "smile": 0.7, "hlx": KEYS_L[0], "hly": KEYS_L[1], "lew": 0.0,
+           "hrx": 167, "hry": 62, **elbows(right=(196, 106)), "tilt": 6}),
+    (4.4, {}),
+    (5.2, {**HANDS_ON_KEYS, **LOOK_SCREEN, **NEUTRAL_FACE, "puff": 0.0}),
+)
+
+
+def roar_shy(t, pet):
+    """Грозно рычит «Р-р-р!» — и сам смущается."""
+    p = roar(t)
+    k = pulse(t, 3.0, 4.4, 0.3)
+    p["hrx"] += 3.0 * math.sin(t * 16) * k  # смущённо чешет затылок
+    return p
+
+
+
 class Activity:
     def __init__(self, func, duration=None, blend=0.45, screen="map"):
         self.func = func
@@ -725,6 +1100,8 @@ ACTIVITIES = {
     "lean": Activity(lean, lean.duration),
     "notes": Activity(notes, _notes.duration),
     "neck": Activity(neck, 4.2),
+    "pen_spin": Activity(pen_spin, 6.0),
+    "nod_off": Activity(nod_off, nod_off.duration),
     # свои дела
     "window": Activity(window, window.duration),
     "phone": Activity(phone, _phone_frames.duration),
@@ -735,6 +1112,16 @@ ACTIVITIES = {
     "selfie": Activity(selfie, _selfie_frames.duration),
     "relax": Activity(relax, relax.duration),
     "board": Activity(board, board.duration),
+    "call": Activity(call, _call_frames.duration),
+    "juggle": Activity(juggle, 8.0),
+    "paper_ball": Activity(paper_ball, 7.0),
+    "yawn": Activity(yawn, yawn.duration),
+    "sneeze": Activity(sneeze, _sneeze_frames.duration),
+    "dumbbell": Activity(dumbbell, _dumbbell_frames.duration),
+    # уходит из кадра: встаёт и уходит → пусто → возвращается
+    "leave": Activity(leave, 3.4, blend=0.4),
+    "gone": Activity(gone, blend=0.05),
+    "return": Activity(come_back, 3.3, blend=0.05),
     # любимые дела
     "tiger": Activity(tiger, _tiger_frames.duration),
     "tiger_play": Activity(tiger_play, _tiger_play_frames.duration),
@@ -742,18 +1129,28 @@ ACTIVITIES = {
     "dance": Activity(dance, 9.2),
     "ponder": Activity(ponder, _ponder_frames.duration),
     "plane": Activity(plane, 9.4),
+    "fly": Activity(fly, 9.4),
+    "glasses": Activity(clean_glasses, glasses.duration),
+    "mane": Activity(mane, 7.8),
+    "roar": Activity(roar_shy, roar.duration),
     # реакции и сон
     "nap": Activity(nap, blend=1.2, screen="sleep"),
     "wake": Activity(wake, 0.9, blend=0.15, screen="sleep"),
     "wave": Activity(wave, 1.8, blend=0.25),
     "saved": Activity(saved, saved.duration, blend=0.2, screen="saved"),
     "oops": Activity(oops, oops.duration, blend=0.2, screen="undo"),
+    # начальник в кабинете
+    "startle": Activity(startle, 1.0, blend=0.12),
+    "fake_typing": Activity(fake_typing, blend=0.25, screen="typing"),
+    "listen": Activity(listen, blend=0.5),
 }
 
-FOCUS = ["read", "chin", "scratch", "lean", "notes", "neck"]
+FOCUS = ["read", "chin", "scratch", "lean", "notes", "neck", "pen_spin", "nod_off"]
 IDLE_COMMON = ["window", "phone", "coffee", "stretch", "banana", "read_doc", "selfie",
-               "relax", "board"]
-REACTIONS = ["wave", "wake", "saved", "oops"]
+               "relax", "board", "call", "juggle", "paper_ball", "yawn", "sneeze", "dumbbell"]
+AWAY = ["leave", "gone", "return"]
+# Эти занятия не прерываются нажатиями — сначала доигрываются до конца
+REACTIONS = ["wave", "wake", "saved", "oops", "startle", "leave", "return"]
 
 
 class Animator:

@@ -295,6 +295,85 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(brain.idle_timeout, 30)
         self.assertIsNone(brain.nap_after)
 
+    def test_quiz_flow(self):
+        from q_pets.quiz import Quiz
+        self.start_qgis()
+        panel = self.plugin.panel
+        questions = [{"id": i, "q": "Вопрос %d?" % i, "options": ["да", "нет", "может", "никогда"],
+                      "ref": "п. %d" % i} for i in (1, 2)]
+        panel.quiz = Quiz(questions)
+        self.assertTrue(panel.quiz_enabled)  # по умолчанию включена
+        panel.next_quiz = 0.0
+        panel.check_quiz()
+        self.assertTrue(panel.quiz_showing)
+        quiz = panel.quiz_widget
+        right = quiz.question["answer"]
+        wrong = (right + 1) % 4
+        quiz.choose(wrong)
+        self.assertIn("b3261e", quiz.answers[wrong].styleSheet().lower())  # красный
+        self.assertIn("F5B700".lower(), quiz.answers[right].styleSheet().lower())  # жёлтый
+        quiz.choose(right)  # второй щелчок ничего не меняет
+        self.assertEqual((panel.quiz_right, panel.quiz_total), (0, 1))
+        quiz.close_question()
+        self.assertFalse(panel.quiz_showing)
+        self.assertEqual(panel.brain.pending_reaction, "oops")
+        self.assertGreater(panel.next_quiz, time.monotonic() + 60)
+        # следующий — другой вопрос, и правильный ответ засчитывается
+        panel.show_quiz()
+        quiz.choose(quiz.question["answer"])
+        self.assertEqual((panel.quiz_right, panel.quiz_total), (1, 2))
+        settings = QgsSettings()
+        self.assertEqual(int(settings.value("q_pets/quiz_total")), 2)
+        self.assertEqual(sorted(int(i) for i in settings.value("q_pets/quiz_seen").split(",")), [1, 2])
+
+    def test_quiz_waits_without_questions_or_when_collapsed(self):
+        from q_pets.quiz import Quiz
+        self.start_qgis()
+        panel = self.plugin.panel
+        panel.quiz = Quiz([])
+        panel.next_quiz = 0.0
+        panel.check_quiz()
+        self.assertFalse(panel.quiz_showing)
+        panel.quiz = Quiz([{"id": 1, "q": "?", "options": ["a", "b", "c", "d"]}])
+        panel.set_collapsed(True)
+        panel.check_quiz()
+        self.assertFalse(panel.quiz_showing)
+        panel.set_collapsed(False)
+        panel.set_quiz_enabled(False)
+        panel.check_quiz()
+        self.assertFalse(panel.quiz_showing)
+
+    def test_visitors_are_drawn_and_can_be_turned_off(self):
+        self.start_qgis()
+        panel = self.plugin.panel
+        view = panel.view
+        now = time.monotonic()
+        panel.brain.boss.call(now)
+        panel.brain.fox.enabled = True
+        view.tick()
+        self.assertTrue(panel.brain.boss.present)
+        view.resize(340, 260)
+        self.assertFalse(view.grab().isNull())
+        panel.set_visitor(panel.brain.boss, "q_pets/boss", False)
+        panel.set_visitor(panel.brain.fox, "q_pets/fox", False)
+        panel.set_can_leave(False)
+        self.plugin.unload()
+        self.plugin = type(self.plugin)(self.iface)
+        self.plugin.initGui()
+        brain = self.plugin.panel.brain
+        self.assertFalse(brain.boss.enabled)
+        self.assertFalse(brain.fox.enabled)
+        self.assertFalse(brain.can_leave)
+
+    def test_pet_choice_survives_restart(self):
+        panel = self.plugin.panel
+        panel.combo.setCurrentIndex(panel.combo.findData("lion"))
+        self.plugin.unload()
+        self.plugin = type(self.plugin)(self.iface)
+        self.plugin.initGui()
+        self.assertEqual(self.plugin.panel.brain.pet["name"], "Денис")
+        self.assertEqual(self.plugin.panel.combo.currentText(), "Денис")
+
     def test_unload_cleans_up(self):
         self.start_qgis()
         watcher = self.plugin.watcher
