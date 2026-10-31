@@ -25,6 +25,8 @@
   <a href="CHANGELOG.md">Что нового</a>
 </p>
 
+<p align="center">Приморский филиал ФГБУ «Рослесинфорг»</p>
+
 ---
 
 <p align="center">
@@ -67,14 +69,14 @@
 
 ## Для разработчика
 
-Нужен Python с PyQt5 (`pip install PyQt5`), QGIS для этого не нужен:
+Нужен Python с PyQt5 (`pip install PyQt5`); тест загрузки из ZIP запускается, если есть PyQGIS:
 
 ```bash
-python -m unittest discover -s tests   # тесты (поведение, рисование, плагин с заглушкой QGIS)
+python -m unittest discover -s tests   # тесты: поведение, рисование, плагин; загрузка из ZIP в QGIS
 python tools/preview.py out            # кадры всех анимаций: out/sheet_*.png
 python tools/make_icon.py              # перерисовать q_pets/icon.png
 python tools/make_doc_images.py        # картинки для документации: docs/img
-python tools/build_zip.py              # dist/q_pets.zip для установки
+python tools/build_zip.py              # release/q_pets-<версия>.zip для установки
 python tools/build_docs.py             # docs/ИНСТРУКЦИЯ.pdf (нужны markdown, Node.js, Playwright)
 node tools/build_presentation.js       # PDF презентации из docs/presentation/source
 ```
@@ -95,7 +97,7 @@ node tools/build_presentation.js       # PDF презентации из docs/pr
 Чтобы добавить питомца, допишите его в `pets.py`; его любимые дела (`specials`) — анимации из
 `animation.py` (словарь `ACTIVITIES`).
 
-Тесты идут на каждый push в GitHub Actions (Ubuntu 24.04, PyQt5, без окна).
+Тесты идут на каждый push в GitHub Actions (Ubuntu 24.04, настоящий QGIS без окна).
 
 ## Авторы и лицензия
 
