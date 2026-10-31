@@ -1,0 +1,13 @@
+{
+  "title": "Q-pets",
+  "subtitle": "Питомец, который работает вместе с вами в QGIS: обезьянки, лягушонок и плюшевый лев, гости в кабинете и викторина по Лесоустроительной инструкции",
+  "org": ["ПИТОМЕЦ ДЛЯ QGIS"],
+  "authors": "Разработчики: Джавршян Роберт и Claude (Anthropic)",
+  "metadata": "q_pets/metadata.txt",
+  "logo": "q_pets/icon.png",
+  "logo_width": "40mm",
+  "accent": "#d9822b",
+  "dark": "#2d2a32",
+  "light": "#fbf3e6",
+  "link": "#b0611a"
+}
